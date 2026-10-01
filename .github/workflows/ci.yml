@@ -21,4 +21,4 @@ jobs:
       - name: Coverage limits
         run: |
           echo "npm test drives the commands against a fake OATS_CLI_BIN that models kernel 0.34.0's refusals and output shapes."
-          echo "NOT COVERED here: the live rehearsal against a real kernel (spawn, session upload/start, aweb identities); see README 'Verification'."
+          echo "NOT COVERED here: the live rehearsal against a real kernel (spawn, session upload/start, aweb identities); see README 'Development'."
