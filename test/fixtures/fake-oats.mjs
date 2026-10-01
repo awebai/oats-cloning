@@ -126,7 +126,7 @@ if (cmd === "spawn") {
     relation: ov.relation ?? relation ?? undefined, relativeTo: relation && relation !== "unrelated" ? relativeTo : undefined,
     spawnOrigin: relation ? "instance" : "operator",
     capabilityMeta: { "oats.aweb": { alias: ov.alias ?? instance, identity: { mode: "local", alias: ov.alias ?? instance } } },
-    launch: { harness, hooks: { env: { AWEB_IDENTITY_HOME: ov.identityHome ?? join(home, ".aw") } } },
+    launch: { harness, hooks: { env: ov.noIdentityEnv ? { AWEB_DELIVERY: "session" } : { AWEB_IDENTITY_HOME: ov.identityHome ?? join(home, ".aw") } } },
     workspace: { soul: soul.includes("/") ? { qualifiedName: soul, name: soul.split("/")[1] } : { id: `github.com/acme/agents#${soul}` } },
     providers, launched: !has("no-launch"), decision: expect !== undefined ? decision : undefined,
   };

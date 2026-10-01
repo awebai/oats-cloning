@@ -128,17 +128,30 @@ export function awDid(identityHome, env) {
   try { const o = JSON.parse(r.stdout); return typeof o?.did === "string" && o.did ? { did: o.did, alias: o.alias ?? null } : null; } catch { return null; }
 }
 
+/** The aweb identity home of an instance: the one its hooks recorded, else its
+ *  own <home>/.aw when that is a real directory. A home started later with
+ *  `oats session start` records none (oats.aweb 1.17.5's launch hook drops the
+ *  spawn hook's AWEB_IDENTITY_HOME), but its identity still lives there. */
+function identityHomeIn(meta, home) {
+  const recorded = identityHomeOf(meta);
+  if (recorded) return { path: recorded, recorded: true };
+  if (!home) return { path: null, recorded: false };
+  try { return lstatSync(join(home, ".aw")).isDirectory() ? { path: join(home, ".aw"), recorded: false } : { path: null, recorded: false }; }
+  catch { return { path: null, recorded: false }; }
+}
+
 const usesAweb = (meta) => Boolean(meta?.capabilityMeta?.["oats.aweb"]) || (meta?.capabilities || []).some((c) => c?.id === "oats.aweb");
 const awebIdentityMode = (meta) => meta?.capabilityMeta?.["oats.aweb"]?.identity?.mode ?? null;
 
 /** R2d: the clone's messaging identity is its own, never the source's seat. */
-export function checkIdentity(cloneMeta, srcMeta, { clone, cloneHome, env, whoami = awDid }) {
+export function checkIdentity(cloneMeta, srcMeta, { clone, cloneHome, srcHome, env, whoami = awDid }) {
   if (!usesAweb(srcMeta) && !usesAweb(cloneMeta)) return { ok: true, check: "identity", detail: "no aweb messaging" };
   const meta = cloneMeta?.capabilityMeta?.["oats.aweb"] || {};
   const problems = [];
   if (meta.alias !== clone) problems.push("alias is not the clone's name");
   if (awebIdentityMode(cloneMeta) === "global") problems.push("identity is a global (resident) identity");
-  const cloneHomeId = identityHomeOf(cloneMeta), srcHomeId = identityHomeOf(srcMeta);
+  const cloneId = identityHomeIn(cloneMeta, cloneHome), srcId = identityHomeIn(srcMeta, srcHome);
+  const cloneHomeId = cloneId.path, srcHomeId = srcId.path;
   if (!cloneHomeId) problems.push("no identity home recorded");
   else {
     let real = null;
@@ -153,7 +166,8 @@ export function checkIdentity(cloneMeta, srcMeta, { clone, cloneHome, env, whoam
     if (theirs && mine.did === theirs.did) problems.push("the clone's did is the source's");
     if (srcHomeId && !theirs) problems.push("the source's did could not be read to compare");
   }
-  return problems.length ? { ok: false, check: "identity", detail: problems.join("; ") } : { ok: true, check: "identity", detail: "alias, identity home and did are the clone's own" };
+  const warning = cloneHomeId && !cloneId.recorded ? "the clone's session has no AWEB_IDENTITY_HOME (a later session start does not keep it); its aw works from its home, not from ./work" : undefined;
+  return problems.length ? { ok: false, check: "identity", detail: problems.join("; "), ...(warning ? { warning } : {}) } : { ok: true, check: "identity", detail: "alias, identity home and did are the clone's own", ...(warning ? { warning } : {}) };
 }
 
 const mode = (path) => { try { const st = lstatSync(path); return st.isFile() ? st.mode & 0o777 : null; } catch { return null; } };
@@ -296,7 +310,7 @@ export function spawnClone(argv, deps = {}) {
     record(Boolean(listed) && listed.row.home && realHome && realpathSync(listed.row.home) === realHome, "status");
   } catch { record(false, "status", "oats status failed"); }
   let identity = { ok: false, check: "identity", detail: "not checked" };
-  if (cloneMeta && started) identity = checkIdentity(cloneMeta, srcLive.meta, { clone, cloneHome: realHome, env, whoami: deps.whoami });
+  if (cloneMeta && started) identity = checkIdentity(cloneMeta, srcLive.meta, { clone, cloneHome: realHome, srcHome: srcLive.home, env, whoami: deps.whoami });
   checks.push(identity);
 
   const failed = checks.filter((c) => !c.ok);
@@ -307,8 +321,9 @@ export function spawnClone(argv, deps = {}) {
     redactions,
     source: { instance: srcLive.name, home: srcLive.home, soul: src.soul.name },
     checks,
-    ...(warnings.length ? { warnings } : {}),
   };
+  if (identity.warning) warnings.push(identity.warning);
+  if (warnings.length) answer.warnings = warnings;
   const receiptPath = join(cloneDir, "receipt.json");
   writeJson(receiptPath, { version: 1, createdAt: now().toISOString(), cloner: inv.instance, requestSha256, ok: failed.length === 0, ...answer });
   cleanup({ keepBrief: false });

@@ -203,6 +203,14 @@ test("an identity home outside the clone, or another alias, is E_CLONE_IDENTITY"
   assert.equal(codeOf(() => b.run()), "E_CLONE_IDENTITY");
 });
 
+test("a deferred start that records no identity home falls back to the clone's own .aw, with a warning", (t) => {
+  const { w, run } = setup(t);
+  w.setState({ applyOverrides: { noIdentityEnv: true } });
+  const out = run();
+  assert.ok(out.checks.find((c) => c.check === "identity").ok);
+  assert.match(out.warnings.join("\n"), /no AWEB_IDENTITY_HOME/);
+});
+
 test("checks that fail after the apply are E_CLONE_UNVERIFIED, naming the clone and each failed check", (t) => {
   const cases = [
     [{ applyOverrides: { relation: "child" } }, "relation"],
