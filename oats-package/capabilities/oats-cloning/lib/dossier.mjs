@@ -11,8 +11,10 @@ import { readConsent, readTaskRequest } from "./consent.mjs";
 import { directoryListing, gitWorkState } from "./workstate.mjs";
 
 // `oats cloning dossier <source>`: run by the cloner, read-only on the source.
-// Everything lands in <cloner home>/clone/ (the home, not work/: retirement
-// deletes the home, while a nonempty work/ would be kept in recovery storage).
+// Everything lands in <cloner home>/clone/, never work/. Retirement (kernel
+// 0.34) keeps a changed home in private recovery storage, so `spawn` deletes
+// clone/source/ and dossier.json once it applied, and a cloner that stops
+// without spawning deletes clone/ before it retires (/spawn-clone).
 
 export const FILE_MAX = 1024 * 1024, TOTAL_MAX = 4 * 1024 * 1024;
 const TOP_FILES = ["TASK.md", "STATE.md", "log.md"];

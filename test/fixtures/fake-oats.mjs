@@ -90,7 +90,10 @@ if (cmd === "spawn") {
   if (relation === "unrelated" && relativeTo) refuse("E_BAD_ARGS", "--relation unrelated takes no --relative-to");
   if (parent && (relation || relativeTo)) refuse("E_BAD_ARGS", "--parent is sugar for --relative-to <instance> --relation child — use one form, not both");
   if (parent) { relation = "child"; relativeTo = parent; }
-  if (relativeTo && relation !== "unrelated" && !state.instances[relativeTo]) refuse(parent ? "E_PARENT_NOT_FOUND" : "E_RELATIVE_NOT_FOUND", `"${relativeTo}" does not match any known instance`);
+  // The kernel normalizes "unrelated" away before recording (core.mjs): no relation, no anchor.
+  const unrelated = relation === "unrelated";
+  if (unrelated) { relation = undefined; relativeTo = undefined; }
+  if (relativeTo && !state.instances[relativeTo]) refuse(parent ? "E_PARENT_NOT_FOUND" : "E_RELATIVE_NOT_FOUND", `"${relativeTo}" does not match any known instance`);
   const taskFile = flag("task-file");
   if (taskFile && !existsSync(taskFile)) refuse("E_BAD_ARGS", `--task-file not found: ${taskFile}`);
   const base = flag("base");
@@ -123,7 +126,7 @@ if (cmd === "spawn") {
     agent, instance, home, work: "directory", harness, model: model ?? undefined,
     ...(decisionCore.yolo !== null ? { yolo: decisionCore.yolo } : {}),
     parentInstance: relation === "child" ? relativeTo : undefined,
-    relation: ov.relation ?? relation ?? undefined, relativeTo: relation && relation !== "unrelated" ? relativeTo : undefined,
+    relation: ov.relation ?? relation ?? undefined, relativeTo: relation ? relativeTo : undefined,
     spawnOrigin: relation ? "instance" : "operator",
     capabilityMeta: { "oats.aweb": { alias: ov.alias ?? instance, identity: { mode: "local", alias: ov.alias ?? instance } } },
     launch: { harness, hooks: { env: ov.noIdentityEnv ? { AWEB_DELIVERY: "session" } : { AWEB_IDENTITY_HOME: ov.identityHome ?? join(home, ".aw") } } },

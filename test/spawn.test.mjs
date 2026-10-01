@@ -63,7 +63,8 @@ test("spawn: an unlaunched clone, a preamble-only TASK.md (0600), the brief as a
   assert.equal(out.attachment.sha256, out.brief.sha256);
   const order = w.calls().filter((c) => ["spawn", "session"].includes(c.argv[0])).map((c) => c.argv[0] === "spawn" ? (c.argv.includes("--preview") ? "preview" : "apply") : c.argv[1]);
   assert.deepEqual(order, ["preview", "apply", "upload", "start"]);
-  for (const f of ["brief.md", "clone-task.md", "upload"]) assert.ok(!existsSync(join(clone, f)), `${f} is deleted after verification`);
+  for (const f of ["brief.md", "clone-task.md", "upload", "source", "dossier.json"]) assert.ok(!existsSync(join(clone, f)), `${f} is deleted after verification`);
+  for (const f of ["receipt.json", "request.json", "plan.json"]) assert.ok(existsSync(join(clone, f)), `${f} stays as the cloner's evidence`);
   assert.ok(JSON.parse(readFileSync(join(clone, "receipt.json"), "utf8")).ok);
   for (const c of w.calls()) assert.ok(!c.env.some((k) => /^(AWEB_|PI_AGENT|OATS_INSTANCE)/.test(k)));
 });

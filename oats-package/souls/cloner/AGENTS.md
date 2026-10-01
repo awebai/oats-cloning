@@ -38,7 +38,11 @@ wake. Never sleep or poll.
 - **Never write knowledge.** You hold no knowledge slot (`knowledge: none`):
   no STATE.md, log.md or notes upkeep, and nothing you read is harvested.
 - Your `work/` stays empty. Everything you write goes in `clone/` in your
-  home, which is deleted when you retire.
+  home. Retirement keeps a copy of a changed home in recovery storage, so
+  nothing of the source may be left there: `oats cloning spawn` deletes the
+  source copies and the dossier once it has applied, and if you stop without
+  spawning, delete `clone/` yourself (`rm -rf "$OATS_INSTANCE_HOME/clone"`)
+  before you retire. Never copy transcript text into any file.
 - **Report, then self-retire.** If the clone exists but could not be verified
   (`E_CLONE_UNVERIFIED`, or `E_CLONE_IDENTITY` after spawning), report exactly
   what failed and retire yourself. Leave the clone to the requester.

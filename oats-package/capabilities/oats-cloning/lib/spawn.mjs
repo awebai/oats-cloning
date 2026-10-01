@@ -227,10 +227,17 @@ export function spawnClone(argv, deps = {}) {
   const uploadDir = ensurePrivateDir(join(cloneDir, "upload"));
   const uploadFile = writePrivate(join(uploadDir, BRIEF_NAME), attachment);
   const taskFile = writePrivate(join(cloneDir, "clone-task.md"), pre.text);
+  // Retirement snapshots a changed home into recovery storage (kernel 0.34), so
+  // once the apply ran, the copies of the source's files and the dossier go too:
+  // nothing private of the source outlives the cloner. The receipt, request and
+  // plan stay as the cloner's evidence.
   const cleanup = ({ keepBrief }) => {
     rmSync(uploadDir, { recursive: true, force: true });
     rmSync(taskFile, { force: true });
-    if (!keepBrief) rmSync(briefPath, { force: true });
+    if (keepBrief) return;
+    rmSync(briefPath, { force: true });
+    rmSync(join(cloneDir, "source"), { recursive: true, force: true });
+    rmSync(join(cloneDir, "dossier.json"), { force: true });
   };
 
   // The source's named launch configuration is passed only while it still
@@ -286,8 +293,9 @@ export function spawnClone(argv, deps = {}) {
     try { cloneMeta = readInstanceJson(realHome); } catch { record(false, "instance.json", "unreadable"); }
     if (cloneMeta) {
       record(soulOf(cloneMeta) === plan.soul, "soul", soulOf(cloneMeta));
+      // The kernel normalizes "unrelated" away: an independent clone records no link at all.
       const relOk = plan.relation === "unrelated"
-        ? cloneMeta.relation === "unrelated" && !cloneMeta.relativeTo
+        ? (!cloneMeta.relation || cloneMeta.relation === "unrelated") && !cloneMeta.relativeTo && !cloneMeta.parentInstance && !cloneMeta.siblingInstance
         : cloneMeta.relation === plan.relation && cloneMeta.relativeTo === plan.relativeTo;
       record(relOk, "relation", `${cloneMeta.relation ?? "none"}${cloneMeta.relativeTo ? ` of ${cloneMeta.relativeTo}` : ""}`);
     }
