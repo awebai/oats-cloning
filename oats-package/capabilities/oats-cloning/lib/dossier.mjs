@@ -1,0 +1,167 @@
+import { lstatSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { fail } from "./errors.mjs";
+import { parseArgs } from "./args.mjs";
+import { requireInstance } from "./context.mjs";
+import { kernelJson } from "./kernel.mjs";
+import { filterInstance, readStatus, resolveInstance } from "./instances.mjs";
+import { parseRequestBlock, sha256 } from "./request-format.mjs";
+import { ensurePrivateDir, inside, readRegularFile, writeJson, writePrivate } from "./files.mjs";
+import { readConsent, readTaskRequest } from "./consent.mjs";
+import { directoryListing, gitWorkState } from "./workstate.mjs";
+
+// `oats cloning dossier <source>`: run by the cloner, read-only on the source.
+// Everything lands in <cloner home>/clone/ (the home, not work/: retirement
+// deletes the home, while a nonempty work/ would be kept in recovery storage).
+
+export const FILE_MAX = 1024 * 1024, TOTAL_MAX = 4 * 1024 * 1024;
+const TOP_FILES = ["TASK.md", "STATE.md", "log.md"];
+const NOTES_MAX_DEPTH = 8, NOTES_MAX_ENTRIES = 2000;
+
+/** The home files a dossier may copy: TASK.md, STATE.md, log.md and
+ *  notes/**\/*.md. Only regular files reached through real directories, never
+ *  through a symlink, contained in the home after realpath. */
+export function candidateFiles(realHome) {
+  const out = TOP_FILES.map((name) => ({ rel: name, abs: join(realHome, name) }));
+  const notes = join(realHome, "notes");
+  let st;
+  try { st = lstatSync(notes); } catch { return { files: out, skipped: [] }; }
+  const skipped = [];
+  if (st.isSymbolicLink()) return { files: out, skipped: [{ path: "notes", skipped: "symlink" }] };
+  if (!st.isDirectory()) return { files: out, skipped: [{ path: "notes", skipped: "not-a-directory" }] };
+  let seen = 0;
+  const walk = (abs, rel, depth) => {
+    let names;
+    try { names = readdirSync(abs).sort(); } catch { skipped.push({ path: rel, skipped: "unreadable" }); return; }
+    for (const name of names) {
+      if (++seen > NOTES_MAX_ENTRIES) { skipped.push({ path: rel, skipped: "over-entry-budget" }); return; }
+      const childAbs = join(abs, name), childRel = `${rel}/${name}`;
+      let cst;
+      try { cst = lstatSync(childAbs); } catch { continue; }
+      if (cst.isSymbolicLink()) { skipped.push({ path: childRel, skipped: "symlink" }); continue; }
+      if (cst.isDirectory()) {
+        if (depth >= NOTES_MAX_DEPTH) skipped.push({ path: childRel, skipped: "too-deep" });
+        else walk(childAbs, childRel, depth + 1);
+      } else if (name.endsWith(".md")) out.push({ rel: childRel, abs: childAbs });
+    }
+  };
+  walk(notes, "notes", 1);
+  return { files: out, skipped };
+}
+
+/** Copy the candidates into `dest`, within the per-file and total budgets. */
+export function copyHomeFiles(realHome, dest) {
+  const { files, skipped } = candidateFiles(realHome);
+  const entries = [];
+  let total = 0;
+  for (const { rel, abs } of files) {
+    const r = readRegularFile(abs, FILE_MAX);
+    if (r.skipped === "absent") continue;
+    if (!r.bytes) { entries.push({ path: rel, ...(r.size !== undefined ? { bytes: r.size } : {}), copied: false, skipped: r.skipped }); continue; }
+    let real;
+    try { real = realpathSync(abs); } catch { entries.push({ path: rel, copied: false, skipped: "changed" }); continue; }
+    if (!inside(realHome, real)) { entries.push({ path: rel, copied: false, skipped: "outside-home" }); continue; }
+    if (total + r.size > TOTAL_MAX) { entries.push({ path: rel, bytes: r.size, copied: false, skipped: "over-total-budget" }); continue; }
+    total += r.size;
+    writePrivate(join(dest, ...rel.split("/")), r.bytes);
+    entries.push({ path: rel, bytes: r.size, sha256: sha256(r.bytes), copied: true });
+  }
+  for (const s of skipped) entries.push({ ...s, copied: false });
+  return { entries, copiedBytes: total };
+}
+
+export function readWork(src, env) {
+  const mode = src.meta.work ?? null;
+  const dir = join(src.home, "work");
+  if (["worktree", "checkout", "attached"].includes(mode)) {
+    return { mode, ...gitWorkState(dir, { baseOid: src.meta?.decision?.base?.oid ?? null, env }) };
+  }
+  if (mode === "directory") {
+    let st;
+    try { st = lstatSync(dir); } catch { return { mode, listing: null, note: "no work directory" }; }
+    if (!st.isDirectory()) return { mode, listing: null, note: st.isSymbolicLink() ? "work is a symlink; not followed" : "work is not a directory" };
+    return { mode, listing: directoryListing(dir) };
+  }
+  return { mode, note: "not read in this work mode" };
+}
+
+export function readTranscript(src, ctx) {
+  const { value: cap } = kernelJson(["capture", "--home", src.home, "--quiet"], { ...ctx, timeout: 600000 });
+  if (!cap || typeof cap !== "object") fail("E_CLONE_KERNEL", "oats capture --home answered no object");
+  const sessions = [];
+  for (const s of Array.isArray(cap.sessions) ? cap.sessions : []) {
+    if (typeof s?.thread !== "string" || typeof s?.lastTurnId !== "string") continue;
+    const row = { thread: s.thread, sessionId: s.sessionId ?? null, source: s.source ?? null, lastTurnId: s.lastTurnId, turns: null };
+    try {
+      const { value } = kernelJson(["recall", "--thread", s.thread, "--json", "--ids-only", "--until", s.lastTurnId], { ...ctx, timeout: 120000 });
+      row.turns = Array.isArray(value?.turns) ? value.turns.length : null;
+    } catch (e) { row.error = e.code || "E_CLONE_KERNEL"; }
+    sessions.push(row);
+  }
+  return {
+    included: true,
+    status: typeof cap.status === "string" ? cap.status : "unknown",
+    complete: cap.complete === true,
+    sessions,
+    ...(typeof cap.error === "string" ? { error: cap.error } : {}),
+    ...(Array.isArray(cap.unattributed) ? { unattributed: cap.unattributed.length } : {}),
+  };
+}
+
+export function dossier(argv, deps = {}) {
+  const env = deps.env ?? process.env, cwd = deps.cwd ?? process.cwd(), now = deps.now ?? (() => new Date());
+  const { flags, positionals } = parseArgs(argv, { values: ["transcript"], switches: ["json"], positionals: 1 });
+  const source = positionals[0];
+  if (!source) fail("E_CLONE_USAGE", "usage: oats cloning dossier <source-instance> [--transcript include|exclude] --json");
+  const inv = requireInstance(env, cwd);
+  const { request, sha256: requestSha256 } = parseRequestBlock(readTaskRequest(inv.home));
+  if (request.source !== source) fail("E_CLONE_REQUEST", `the request is for ${request.source}, not ${source}`);
+  const transcript = flags.transcript ?? request.transcript;
+  if (!["include", "exclude"].includes(transcript)) fail("E_CLONE_USAGE", "--transcript is include or exclude");
+  if (transcript === "include") {
+    if (request.transcript !== "include") fail("E_CLONE_TRANSCRIPT_CONSENT", `the requester excluded ${source}'s transcript; read it only if a new request includes it`);
+    if (!readConsent(inv.home, { requestSha256, source })) {
+      fail("E_CLONE_CONSENT", `no operator consent for reading ${source}'s transcript: the operator runs \`oats cloning consent ${inv.instance} --soul <cloner soul>\` from the deployment. Until then run dossier with --transcript exclude and build the rest`, { cloner: inv.instance, requestSha256 });
+    }
+  }
+
+  const ctx = { cwd: inv.home, env };
+  const status = readStatus(ctx);
+  const src = resolveInstance(status, source);
+  if (src.name === inv.instance) fail("E_CLONE_SOURCE", "a cloner never clones itself");
+
+  const cloneDir = ensurePrivateDir(join(inv.home, "clone"));
+  const sourceDir = join(cloneDir, "source");
+  rmSync(sourceDir, { recursive: true, force: true });
+  ensurePrivateDir(sourceDir);
+
+  const files = copyHomeFiles(src.home, sourceDir);
+  const work = readWork(src, env);
+  const transcriptRecord = transcript === "include" ? readTranscript(src, ctx) : { included: false };
+  const doc = {
+    version: 1,
+    createdAt: now().toISOString(),
+    cloner: inv.instance,
+    request, requestSha256,
+    source: { instance: src.name, home: src.home, soul: filterInstance(src.meta).soul.name, running: src.running },
+    instance: filterInstance(src.meta, { running: src.running }),
+    files: files.entries,
+    work,
+    transcript: transcriptRecord,
+  };
+  const path = join(cloneDir, "dossier.json");
+  writeJson(path, doc);
+  writeJson(join(cloneDir, "request.json"), request);
+  const copied = files.entries.filter((f) => f.copied);
+  return {
+    dossier: path,
+    summary: {
+      source: src.name, soul: doc.source.soul, running: src.running,
+      files: { copied: copied.length, bytes: files.copiedBytes, notCopied: files.entries.length - copied.length },
+      work: { mode: work.mode, branch: work.branch ?? null, head: work.head ?? null, uncommitted: work.status?.total ?? null },
+      transcript: transcriptRecord.included
+        ? { included: true, status: transcriptRecord.status, complete: transcriptRecord.complete, sessions: transcriptRecord.sessions.length, turns: transcriptRecord.sessions.reduce((n, s) => n + (s.turns ?? 0), 0) }
+        : { included: false },
+    },
+  };
+}

@@ -1,0 +1,6 @@
+schemaVersion: 2
+name: oats-cloning-expert
+description: "Expert in the oats.cloning package (cloning an OATS instance for a new goal through a short-lived cloner soul): its published behaviour, the kernel surfaces it drives, and its pull requests."
+work: worktree
+# oats.core and the oats.okf knowledge slot come from the workspace defaults.
+# What this soul owns and reads in the central base is okf.json beside this file.
