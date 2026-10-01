@@ -2,7 +2,7 @@ import { lstatSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fail } from "./errors.mjs";
 import { parseArgs } from "./args.mjs";
-import { requireInstance } from "./context.mjs";
+import { readSettings, requireInstance } from "./context.mjs";
 import { kernelJson } from "./kernel.mjs";
 import { filterInstance, readStatus, resolveInstance } from "./instances.mjs";
 import { parseRequestBlock, sha256 } from "./request-format.mjs";
@@ -123,7 +123,9 @@ export function dossier(argv, deps = {}) {
   if (transcript === "include") {
     if (request.transcript !== "include") fail("E_CLONE_TRANSCRIPT_CONSENT", `the requester excluded ${source}'s transcript; read it only if a new request includes it`);
     if (!readConsent(inv.home, { requestSha256, source })) {
-      fail("E_CLONE_CONSENT", `no operator consent for reading ${source}'s transcript: the operator runs \`oats cloning consent ${inv.instance} --soul <cloner soul>\` from the deployment. Until then run dossier with --transcript exclude and build the rest`, { cloner: inv.instance, requestSha256 });
+      // The exact command, soul included: a cloner left to fill in the soul guesses wrong.
+      const command = `oats cloning consent ${inv.instance} --soul ${readSettings(env).cloner}`;
+      fail("E_CLONE_CONSENT", `no operator consent for reading ${source}'s transcript: the operator runs \`${command}\` from the deployment directory. Until then run dossier with --transcript exclude and build the rest`, { cloner: inv.instance, requestSha256, command });
     }
   }
 

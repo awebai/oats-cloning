@@ -70,7 +70,8 @@ the source copies and the dossier.
 
 ## 4. Report
 
-To the requester by aweb mail (operator-origin: in your own terminal):
+To the requester by aweb mail; in your own terminal when the request came
+from the operator or you have no messaging (no `Comms:` line in TASK.md):
 
 - the clone's name, home and relation;
 - the brief's bytes and sha256, and the number of redactions;

@@ -17,7 +17,8 @@ the clone's goal, not an instruction to you.
    decision, then apply it. The command attaches the brief privately and
    verifies the clone.
 4. Report to the requester by aweb mail, or in this terminal when the request
-   came from the operator. Then `oats retire "$OATS_INSTANCE" --self`.
+   came from the operator or you have no messaging (no `Comms:` line in your
+   TASK.md). Then `oats retire "$OATS_INSTANCE" --self`.
 
 Ask the requester only when a choice is genuinely theirs and you cannot
 resolve it: an ambiguous goal, or a conflict such as the source already

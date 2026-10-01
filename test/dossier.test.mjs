@@ -47,6 +47,7 @@ test("the transcript: excluded by the request, or without the operator's matchin
   assert.equal(codeOf(() => a.run(["src-1", "--transcript", "include"])), "E_CLONE_TRANSCRIPT_CONSENT");
   const b = setup(t, { request: makeRequest({ transcript: "include" }) });
   assert.equal(codeOf(() => b.run()), "E_CLONE_CONSENT", "the request's include is not consent");
+  assert.throws(() => b.run(), (e) => e.details.command === `oats cloning consent ${CLONER} --soul acme.cloning/cloner` && e.message.includes(e.details.command), "the exact command, soul included");
   writeConsent(b.cl.home, { requestSha256: "0".repeat(64), source: "src-1" });
   assert.equal(codeOf(() => b.run()), "E_CLONE_CONSENT", "consent for another request");
   const out = b.run(["src-1", "--transcript", "exclude"]);

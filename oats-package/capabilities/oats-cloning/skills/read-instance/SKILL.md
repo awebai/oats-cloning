@@ -33,9 +33,9 @@ refuses with `E_CLONE_CONSENT`. Then:
 
 1. run `oats cloning dossier <source> --transcript exclude --json` and do
    all the reading below except the transcript;
-2. tell the requester that consent is pending, giving the exact command from
-   the error (`oats cloning consent <you> --soul <cloner soul>`, run by the
-   operator from the deployment directory);
+2. tell the requester that consent is pending, giving the exact command in
+   the error's `details.command`, unchanged (the operator runs it from the
+   deployment directory);
 3. stop and wait for the wake. **Never** run `consent` yourself, never write
    `clone/consent.json`, never poll;
 4. when woken, run `dossier <source> --transcript include --json` again.
