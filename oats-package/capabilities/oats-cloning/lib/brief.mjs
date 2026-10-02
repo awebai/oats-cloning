@@ -113,6 +113,18 @@ export function buildPreamble(p) {
   ].join("\n");
 }
 
+// What never belongs to a URL's authority: whitespace, the starts of path,
+// query and fragment, and what RFC 3986 never allows raw (" < > ` { } | \ ^ [ ]).
+const URL_STOP = String.raw`\s/?#"<>` + "`" + String.raw`{}|\\^\[\]`;
+/** url-credentials, for a URL after `opener` (bounded by `closer` too), or anywhere. */
+function urlCredentials(opener = "", closer = "") {
+  const lead = opener ? `(?<=${opener})` : "";
+  return {
+    name: "url-credentials", value: true, valueGroup: 5,
+    re: new RegExp(String.raw`${lead}\b([a-z][a-z0-9+.-]*:\/\/)()()([^${URL_STOP}${closer}:]*:([^${URL_STOP}${closer}]*))(?=@)`, "gi"),
+  };
+}
+
 /** Secret patterns (spec §5.3). A seatbelt, not the policy: /plan-clone's
  *  exclusions decide what a brief carries; this catches what slips through. */
 export const PATTERNS = [
@@ -133,11 +145,15 @@ export const PATTERNS = [
   { name: "bearer-token", re: /\b(Authorization["']?\s*:\s*["']?Bearer)(\s+)()([A-Za-z0-9._~+/-]+=*)(?![A-Za-z0-9._~+/=-])/gi, value: true },
   { name: "bearer-token", re: /\b(bearer)(\s+)()((?=[A-Za-z0-9._~+/-]*\d)[A-Za-z0-9._~+/-]{20,}=*)(?![A-Za-z0-9._~+/=-])/gi, value: true },
   // scheme://user:password@host: the whole userinfo goes, the scheme and host
-  // stay. The userinfo runs to the LAST @ of the authority (a raw @ in a
-  // password is still password), and whether it is a value is the password's
-  // call: $USER:literal is redacted, app:$PASSWORD is a reference. Without a
-  // password (git@host:, https://user@host, ssh://git@host) nothing matches.
-  { name: "url-credentials", re: /\b([a-z][a-z0-9+.-]*:\/\/)()()([^\s/?#:]*:([^\s/?#]*))(?=@)/gi, value: true, valueGroup: 5 },
+  // stay. Whether it is a value is the password's call: $USER:literal is
+  // redacted, app:$PASSWORD is a reference. The userinfo runs to the last @
+  // of the URL's authority (a raw @ in a password is still password), and the
+  // authority never crosses what bounds the URL: a URL opened by ' or ( ends
+  // at the matching ' or ). Without a password (git@host:, https://user@host,
+  // ssh://git@host) nothing matches.
+  urlCredentials("'", "'"),
+  urlCredentials(String.raw`\(`, String.raw`\)`),
+  urlCredentials(),
   // NAME=value / NAME: value for credential-shaped names. Only the value is
   // replaced; a reference ($VAR, <placeholder>) is not a value.
   { name: "secret-assignment", re: /\b((?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|TOKEN|SECRET|SECRET_ACCESS_KEY|PASSWORD|PASSWD|PRIVATE_KEY))(\s*[:=]\s*)(["']?)([^\s"'`]{4,})/g, value: true },

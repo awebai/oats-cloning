@@ -167,6 +167,11 @@ test("npm, Google, Bearer and URL credentials: the forms that matter, each repor
     // The userinfo runs to the last @ of the authority, raw or percent-encoded.
     ["https://app:" + "demo@pass42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
     ["https://app:" + "demo%40pass42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
+    // ...but never past what bounds the URL: the host and the content around it stay.
+    ['{"url":"https://app:' + "demo-pass-42" + '@db.example","owner":"ops@example.com"}', "url-credentials", '{"url":"https://[redacted:url-credentials]@db.example","owner":"ops@example.com"}'],
+    ["[db](https://app:" + "demo-pass-42" + "@db.example),[owner](mailto:ops@example.com)", "url-credentials", "[db](https://[redacted:url-credentials]@db.example),[owner](mailto:ops@example.com)"],
+    ["(https://app:" + "pw42" + "@db.example),(ops@example.com)", "url-credentials", "(https://[redacted:url-credentials]@db.example),(ops@example.com)"],
+    ["x = 'https://app:" + "pw42" + "@db.example', o = 'ops@example.com'", "url-credentials", "x = 'https://[redacted:url-credentials]@db.example', o = 'ops@example.com'"],
   ];
   for (const [text, pattern, expected] of cases) {
     const r = redact(text);
