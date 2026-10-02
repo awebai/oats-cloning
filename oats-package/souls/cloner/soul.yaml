@@ -1,0 +1,7 @@
+schemaVersion: 2
+name: cloner
+description: Clones one OATS instance for a new goal — reads the source's home, work state and transcript (through a temporary record), decides what the clone carries, spawns it with the requested relation, reports and retires.
+work: directory
+knowledge: none        # reads private transcripts; nothing of it is harvested
+capabilities:
+  oats.cloning: { from: here }

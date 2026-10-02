@@ -1,0 +1,17 @@
+{
+  "name": "@awebai/oats-cloning",
+  "version": "1.0.0",
+  "description": "Official OATS instance cloning: clone an instance for a new goal through a short-lived cloner soul.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "validate": "node scripts/validate-manifests.mjs",
+    "test": "npm run validate && node --test test/*.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/awebai/oats-cloning"
+  }
+}
