@@ -124,6 +124,15 @@ export const PATTERNS = [
   { name: "aws-access-key-id", re: /\b(?:AKIA|ASIA|ABIA|ACCA|AGPA|AIDA|AIPA|ANPA|ANVA|APKA|AROA)[A-Z0-9]{16}\b/g },
   { name: "slack-token", re: /\bxox[abprs]-[A-Za-z0-9-]{10,}/g },
   { name: "jwt", re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
+  { name: "npm-token", re: /\bnpm_[A-Za-z0-9]{36}(?![A-Za-z0-9])/g },
+  { name: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g },
+  // The token after "Bearer", in a header or bare. Only the token is replaced;
+  // it must look like one (20+ token characters with a digit), so prose such
+  // as "the bearer of" and references ($TOKEN, <token>) never match.
+  { name: "bearer-token", re: /\b([Bb]earer)(\s+)()((?=[A-Za-z0-9._~+/-]*\d)[A-Za-z0-9._~+/-]{20,}=*)(?![A-Za-z0-9._~+/=-])/g, value: true },
+  // scheme://user:password@host: the userinfo goes, the scheme and host stay.
+  // Without a password (git@host:, https://user@host, ssh://git@host) nothing matches.
+  { name: "url-credentials", re: /\b([a-z][a-z0-9+.-]*:\/\/)()()([^\s:@/?#]*:[^\s@/?#]+)(?=@)/gi, value: true },
   // NAME=value / NAME: value for credential-shaped names. Only the value is
   // replaced; a reference ($VAR, <placeholder>) is not a value.
   { name: "secret-assignment", re: /\b((?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|TOKEN|SECRET|SECRET_ACCESS_KEY|PASSWORD|PASSWD|PRIVATE_KEY))(\s*[:=]\s*)(["']?)([^\s"'`]{4,})/g, value: true },

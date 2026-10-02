@@ -106,6 +106,10 @@ const CONTROLS = {
   "slack-token": "xo" + "xb-" + "1234567890-abcdefghijkl",
   "jwt": "ey" + "JhbGciOiJIUzI1NiJ9" + ".ey" + "JzdWIiOiIxMjM0NTY3ODkwIn0" + ".dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
   "secret-assignment": "SERVICE_" + "TOKEN=" + "s3cr3tvalue99",
+  "npm-token": "npm" + "_" + "a1B2c3D4e5".repeat(3) + "f6G7h8",
+  "google-api-key": "AI" + "za" + "Sy" + "A1b2C3d4-_".repeat(3) + "e5f",
+  "bearer-token": "Authorization: " + "Bea" + "rer " + "k7Qz9" + "Lm3Np".repeat(4),
+  "url-credentials": "https://" + "deploy:" + "hunter2" + "pw" + "@git.example.com/repo.git",
 };
 
 test("every pattern has a positive control, and each is redacted by name without its value", () => {
@@ -139,6 +143,41 @@ test("assignment forms: PASSWORD, *_API_KEY, quoted values; references are not v
   assert.match(r.text, /^PASSWORD: \[redacted:secret-assignment\]$/m);
   assert.match(r.text, /^AWEB_API_KEY="\[redacted:secret-assignment\]"$/m);
   assert.match(r.text, /^TOKEN=\$GITHUB_TOKEN$/m);
+});
+
+test("npm, Google, Bearer and URL credentials: the forms that matter, each reported once", () => {
+  const tok = "k7Qz9" + "Lm3Np".repeat(4);
+  const npm = "npm" + "_" + "a1B2c3D4e5".repeat(3) + "f6G7h8";
+  const jwt = "ey" + "JhbGciOiJIUzI1NiJ9" + ".ey" + "JzdWIiOiIxMjM0NTY3ODkwIn0" + ".dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+  const cases = [
+    [`curl -H "authorization: bearer ${tok}" https://api.example.com`, "bearer-token", `curl -H "authorization: bearer [redacted:bearer-token]" https://api.example.com`],
+    [`send it as Bearer ${tok}== in the header`, "bearer-token", "send it as Bearer [redacted:bearer-token] in the header"],
+    [`Authorization: Bearer ${jwt}`, "jwt", "Authorization: Bearer [redacted:jwt]"],
+    [`NPM_TOKEN=${npm}`, "npm-token", "NPM_TOKEN=[redacted:npm-token]"],
+    ["git remote add origin https://" + "x-access-token:" + tok + "@github.com/acme/repo.git", "url-credentials", "git remote add origin https://[redacted:url-credentials]@github.com/acme/repo.git"],
+    ["postgres://" + "app:" + "s3cret" + "@db.internal:5432/main", "url-credentials", "postgres://[redacted:url-credentials]@db.internal:5432/main"],
+  ];
+  for (const [text, pattern, expected] of cases) {
+    const r = redact(text);
+    assert.deepEqual(r.redactions, [{ line: 1, pattern }], text);
+    assert.equal(r.text, expected);
+  }
+});
+
+test("near-misses of the npm, Google, Bearer and URL patterns stay untouched", () => {
+  const text = [
+    "set npm_config_cache, or read npm_package_version; the npm_ prefix is npm's",
+    "AIza is a prefix, AIzaSyShort is too short",
+    "the bearer of bad news; Bearer tokens go in the Authorization header",
+    "Bearer authentication-scheme-description, bearer 12 apples",
+    "Authorization: Bearer $GITHUB_TOKEN and Authorization: Bearer <token>",
+    "git@github.com:awebai/oats-cloning.git, https://user@host.example/x, ssh://git@host.example/repo",
+    "mailto:someone@example.com, localhost:8080, http://localhost:8080/path, https://host.example:443/a@b",
+    "https://$USER:$PASSWORD@host.example is a reference, not a value",
+  ].join("\n");
+  const r = redact(text);
+  assert.deepEqual(r.redactions, []);
+  assert.equal(r.text, text);
 });
 
 test("no false positives on SHAs, hex, UUIDs and ordinary prose", () => {

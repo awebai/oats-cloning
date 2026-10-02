@@ -58,9 +58,17 @@ change.
 
   It then verifies the file modes and the attachment's sha256.
 - **Secrets are redacted, not refused.** The brief and preamble are scanned
-  for private keys, GitHub, Anthropic, `sk-`, AWS and Slack tokens, JWTs and
-  `secret=…` style assignments. Every match is replaced. Only
-  `{line, pattern}` is reported, never the value.
+  for:
+  - private keys;
+  - GitHub, Anthropic, `sk-`, AWS, Slack and npm tokens;
+  - Google API keys;
+  - JWTs;
+  - `Authorization: Bearer` tokens (the token only);
+  - credentials in URLs (`scheme://user:pass@host` keeps its scheme and host);
+  - `secret=…` style assignments.
+
+  Every match is replaced. Only `{line, pattern}` is reported, never the
+  value.
 - **The transcript is read through a temporary record, never the host
   record.** It is included by default: asking for the clone is the consent,
   and `--transcript exclude` opts out. `dossier` runs
