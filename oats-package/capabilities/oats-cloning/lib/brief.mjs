@@ -113,16 +113,49 @@ export function buildPreamble(p) {
   ].join("\n");
 }
 
+const isReference = (v) => /^(?:\$|<|\[redacted|\*{3,}|x{3,}$)/i.test(v);
+
+const URL_SCHEME = /\b[a-z][a-z0-9+.-]*:\/\//gi;
 // What never belongs to a URL's authority: whitespace, the starts of path,
-// query and fragment, and what RFC 3986 never allows raw (" < > ` { } | \ ^ [ ]).
-const URL_STOP = String.raw`\s/?#"<>` + "`" + String.raw`{}|\\^\[\]`;
-/** url-credentials, for a URL after `opener` (bounded by `closer` too), or anywhere. */
-function urlCredentials(opener = "", closer = "") {
-  const lead = opener ? `(?<=${opener})` : "";
-  return {
-    name: "url-credentials", value: true, valueGroup: 5,
-    re: new RegExp(String.raw`${lead}\b([a-z][a-z0-9+.-]*:\/\/)()()([^${URL_STOP}${closer}:]*:([^${URL_STOP}${closer}]*))(?=@)`, "gi"),
-  };
+// query and fragment, and what RFC 3986 never allows raw.
+const URL_STOP = /[\s/?#"<>`{}|\\^[\]]/;
+
+/** Credentials in URLs (scheme://user:password@host), one URL at a time.
+ *  Each URL's authority is bounded once: at a URL_STOP character, at the
+ *  closing ' of a URL opened by ', and at the ) that closes a URL opened by (
+ *  (balanced inner parentheses are part of it). A ${NAME} is read whole. The
+ *  userinfo then runs to the last @ of that authority (a raw @ in a password is
+ *  still password), and the password alone decides: $USER:literal is
+ *  redacted, app:$PASSWORD is a reference. The whole userinfo is replaced;
+ *  the scheme and host stay. Without a password nothing is replaced. A URL
+ *  with no opener that runs into other text with no whitespace between can
+ *  take that text as userinfo: it errs toward redacting, never toward a leak. */
+function urlCredentials(text) {
+  const spans = [];
+  URL_SCHEME.lastIndex = 0;
+  for (let m; (m = URL_SCHEME.exec(text)); ) {
+    const start = m.index + m[0].length, opener = text[m.index - 1];
+    let end = start, depth = 0;
+    while (end < text.length) {
+      const c = text[end];
+      if (c === "$" && text[end + 1] === "{") {
+        const close = text.indexOf("}", end + 2);
+        if (close !== -1 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(text.slice(end + 2, close))) { end = close + 1; continue; }
+      }
+      if (URL_STOP.test(c) || (opener === "'" && c === "'")) break;
+      if (c === "(") depth++;
+      else if (c === ")") { if (depth === 0 && opener === "(") break; depth = Math.max(0, depth - 1); }
+      end++;
+    }
+    URL_SCHEME.lastIndex = Math.max(URL_SCHEME.lastIndex, end);
+    const authority = text.slice(start, end), at = authority.lastIndexOf("@");
+    if (at < 1 || at === authority.length - 1) continue;
+    const userinfo = authority.slice(0, at), colon = userinfo.indexOf(":");
+    if (colon === -1) continue;
+    const password = userinfo.slice(colon + 1);
+    if (password && !isReference(password)) spans.push({ start, end: start + at });
+  }
+  return spans;
 }
 
 /** Secret patterns (spec §5.3). A seatbelt, not the policy: /plan-clone's
@@ -144,16 +177,7 @@ export const PATTERNS = [
   // of" never matches. References ($TOKEN, <token>) are never values.
   { name: "bearer-token", re: /\b(Authorization["']?\s*:\s*["']?Bearer)(\s+)()([A-Za-z0-9._~+/-]+=*)(?![A-Za-z0-9._~+/=-])/gi, value: true },
   { name: "bearer-token", re: /\b(bearer)(\s+)()((?=[A-Za-z0-9._~+/-]*\d)[A-Za-z0-9._~+/-]{20,}=*)(?![A-Za-z0-9._~+/=-])/gi, value: true },
-  // scheme://user:password@host: the whole userinfo goes, the scheme and host
-  // stay. Whether it is a value is the password's call: $USER:literal is
-  // redacted, app:$PASSWORD is a reference. The userinfo runs to the last @
-  // of the URL's authority (a raw @ in a password is still password), and the
-  // authority never crosses what bounds the URL: a URL opened by ' or ( ends
-  // at the matching ' or ). Without a password (git@host:, https://user@host,
-  // ssh://git@host) nothing matches.
-  urlCredentials("'", "'"),
-  urlCredentials(String.raw`\(`, String.raw`\)`),
-  urlCredentials(),
+  { name: "url-credentials", spans: urlCredentials },
   // NAME=value / NAME: value for credential-shaped names. Only the value is
   // replaced; a reference ($VAR, <placeholder>) is not a value.
   { name: "secret-assignment", re: /\b((?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|TOKEN|SECRET|SECRET_ACCESS_KEY|PASSWORD|PASSWD|PRIVATE_KEY))(\s*[:=]\s*)(["']?)([^\s"'`]{4,})/g, value: true },
@@ -171,15 +195,20 @@ const lineAt = (text, offset) => {
 export function redact(text, { firstLine = 1 } = {}) {
   let out = text;
   const redactions = [];
-  for (const { name, re, value, valueGroup } of PATTERNS) {
+  for (const { name, re, value, spans } of PATTERNS) {
+    if (spans) {
+      // Single-line spans, replaced last to first so offsets stay valid.
+      const found = spans(out);
+      for (const { start } of found) redactions.push({ line: lineAt(out, start) + firstLine - 1, pattern: name });
+      for (const { start, end } of found.reverse()) out = `${out.slice(0, start)}[redacted:${name}]${out.slice(end)}`;
+      continue;
+    }
     out = out.replace(re, (...m) => {
       const offset = m.at(-2);
       const match = m[0];
       if (value) {
         const [, key, sep, quote, val] = m;
-        // The part that decides whether this is a value or a reference.
-        const decisive = valueGroup ? m[valueGroup] : val;
-        if (!decisive || /^(?:\$|<|\[redacted|\*{3,}|x{3,}$)/i.test(decisive)) return match;
+        if (isReference(val)) return match;
         redactions.push({ line: lineAt(out, offset) + firstLine - 1, pattern: name });
         return `${key}${sep}${quote}[redacted:${name}]`;
       }

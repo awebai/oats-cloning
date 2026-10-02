@@ -172,6 +172,9 @@ test("npm, Google, Bearer and URL credentials: the forms that matter, each repor
     ["[db](https://app:" + "demo-pass-42" + "@db.example),[owner](mailto:ops@example.com)", "url-credentials", "[db](https://[redacted:url-credentials]@db.example),[owner](mailto:ops@example.com)"],
     ["(https://app:" + "pw42" + "@db.example),(ops@example.com)", "url-credentials", "(https://[redacted:url-credentials]@db.example),(ops@example.com)"],
     ["x = 'https://app:" + "pw42" + "@db.example', o = 'ops@example.com'", "url-credentials", "x = 'https://[redacted:url-credentials]@db.example', o = 'ops@example.com'"],
+    // A ${NAME} username is read whole; balanced parentheses inside a URL opened by ( are its own.
+    ["https://${USER}:" + "demo-pass-42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
+    ["[db](https://app:" + "demo@(part)42" + "@db.example)", "url-credentials", "[db](https://[redacted:url-credentials]@db.example)"],
   ];
   for (const [text, pattern, expected] of cases) {
     const r = redact(text);
@@ -191,6 +194,8 @@ test("near-misses of the npm, Google, Bearer and URL patterns stay untouched", (
     "mailto:someone@example.com, localhost:8080, http://localhost:8080/path, https://host.example:443/a@b",
     "https://$USER:$PASSWORD@host.example and https://app:$PASSWORD@db.example/main are references, not values",
     "https://app:@db.example has an empty password; https://user@host.example:8080/x has none",
+    "https://${USER}:${PASSWORD}@db.example/main is a reference too",
+    "(https://db.example:443),(ops@example.com) and (https://user@db.example:443),(ops@example.com) carry no credentials",
   ].join("\n");
   const r = redact(text);
   assert.deepEqual(r.redactions, []);
