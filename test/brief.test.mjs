@@ -106,10 +106,14 @@ const CONTROLS = {
   "slack-token": "xo" + "xb-" + "1234567890-abcdefghijkl",
   "jwt": "ey" + "JhbGciOiJIUzI1NiJ9" + ".ey" + "JzdWIiOiIxMjM0NTY3ODkwIn0" + ".dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
   "secret-assignment": "SERVICE_" + "TOKEN=" + "s3cr3tvalue99",
+  "npm-token": "npm" + "_" + "a1B2c3D4e5".repeat(3) + "f6G7h8",
+  "google-api-key": "AI" + "za" + "Sy" + "A1b2C3d4-_".repeat(3) + "e5f",
+  "bearer-token": "Authorization: " + "Bea" + "rer " + "k7Qz9" + "Lm3Np".repeat(4),
+  "url-credentials": "https://" + "deploy:" + "hunter2" + "pw" + "@git.example.com/repo.git",
 };
 
 test("every pattern has a positive control, and each is redacted by name without its value", () => {
-  assert.deepEqual(Object.keys(CONTROLS).sort(), PATTERNS.map((p) => p.name).sort());
+  assert.deepEqual(Object.keys(CONTROLS).sort(), [...new Set(PATTERNS.map((p) => p.name))].sort());
   for (const [name, secret] of Object.entries(CONTROLS)) {
     const text = `line one\nthe value: ${secret} end\nline three`;
     const r = redact(text);
@@ -139,6 +143,105 @@ test("assignment forms: PASSWORD, *_API_KEY, quoted values; references are not v
   assert.match(r.text, /^PASSWORD: \[redacted:secret-assignment\]$/m);
   assert.match(r.text, /^AWEB_API_KEY="\[redacted:secret-assignment\]"$/m);
   assert.match(r.text, /^TOKEN=\$GITHUB_TOKEN$/m);
+});
+
+test("npm, Google, Bearer and URL credentials: the forms that matter, each reported once", () => {
+  const tok = "k7Qz9" + "Lm3Np".repeat(4);
+  const npm = "npm" + "_" + "a1B2c3D4e5".repeat(3) + "f6G7h8";
+  const jwt = "ey" + "JhbGciOiJIUzI1NiJ9" + ".ey" + "JzdWIiOiIxMjM0NTY3ODkwIn0" + ".dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+  const cases = [
+    [`curl -H "authorization: bearer ${tok}" https://api.example.com`, "bearer-token", `curl -H "authorization: bearer [redacted:bearer-token]" https://api.example.com`],
+    [`send it as Bearer ${tok}== in the header`, "bearer-token", "send it as Bearer [redacted:bearer-token] in the header"],
+    [`Authorization: Bearer ${jwt}`, "jwt", "Authorization: Bearer [redacted:jwt]"],
+    [`NPM_TOKEN=${npm}`, "npm-token", "NPM_TOKEN=[redacted:npm-token]"],
+    ["git remote add origin https://" + "x-access-token:" + tok + "@github.com/acme/repo.git", "url-credentials", "git remote add origin https://[redacted:url-credentials]@github.com/acme/repo.git"],
+    ["postgres://" + "app:" + "s3cret" + "@db.internal:5432/main", "url-credentials", "postgres://[redacted:url-credentials]@db.internal:5432/main"],
+    // An Authorization header is a credential whatever the token's length, digits or case.
+    ["Authorization: Bearer " + "mF_9.B5f-4.1JqM", "bearer-token", "Authorization: Bearer [redacted:bearer-token]"],
+    ["Authorization: Bearer " + "AbCdEfGhJkLmNpQrStUvWxYz".repeat(2), "bearer-token", "Authorization: Bearer [redacted:bearer-token]"],
+    ["Authorization: BEARER " + tok, "bearer-token", "Authorization: BEARER [redacted:bearer-token]"],
+    ['{"Authorization": "Bearer ' + "abc.def" + '"}', "bearer-token", '{"Authorization": "Bearer [redacted:bearer-token]"}'],
+    // The password decides: a variable or masked username does not shield a literal password.
+    ["https://$USER:" + "demo-pass-42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
+    ["https://***:" + "demo-pass-42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
+    // The userinfo runs to the last @ of the authority, raw or percent-encoded.
+    ["https://app:" + "demo@pass42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
+    ["https://app:" + "demo%40pass42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
+    // ...but never past what bounds the URL: the host and the content around it stay.
+    ['{"url":"https://app:' + "demo-pass-42" + '@db.example","owner":"ops@example.com"}', "url-credentials", '{"url":"https://[redacted:url-credentials]@db.example","owner":"ops@example.com"}'],
+    ["[db](https://app:" + "demo-pass-42" + "@db.example),[owner](mailto:ops@example.com)", "url-credentials", "[db](https://[redacted:url-credentials]@db.example),[owner](mailto:ops@example.com)"],
+    ["(https://app:" + "pw42" + "@db.example),(ops@example.com)", "url-credentials", "(https://[redacted:url-credentials]@db.example),(ops@example.com)"],
+    ["x = 'https://app:" + "pw42" + "@db.example', o = 'ops@example.com'", "url-credentials", "x = 'https://[redacted:url-credentials]@db.example', o = 'ops@example.com'"],
+    // A ${NAME} username is read whole; balanced parentheses inside a URL opened by ( are its own.
+    ["https://${USER}:" + "demo-pass-42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
+    ["[db](https://app:" + "demo@(part)42" + "@db.example)", "url-credentials", "[db](https://[redacted:url-credentials]@db.example)"],
+    // A bracketed IP-literal host is a host.
+    ["https://app:" + "demo-pass-42" + "@[::1]:8443/main", "url-credentials", "https://[redacted:url-credentials]@[::1]:8443/main"],
+    ["postgres://app:" + "demo-pass-42" + "@[2001:db8::1]:5432/main", "url-credentials", "postgres://[redacted:url-credentials]@[2001:db8::1]:5432/main"],
+    // A password may hold a raw / ? # (base64 does) or another character that ends an authority:
+    // the userinfo runs on to the last @ before the URL's token ends, if a host follows it.
+    ["git clone https://bob:" + "pa/ss" + "@github.com/x.git", "url-credentials", "git clone https://[redacted:url-credentials]@github.com/x.git"],
+    ["https://bob:" + "p?ss" + "@host/x", "url-credentials", "https://[redacted:url-credentials]@host/x"],
+    ["https://bob:" + "p#ss" + "@host/x", "url-credentials", "https://[redacted:url-credentials]@host/x"],
+    ["https://bob:" + "p@ss/w" + "@host/x", "url-credentials", "https://[redacted:url-credentials]@host/x"],
+    ["https://bob:" + "a^b|c\\d{e}[f]" + "@host/x", "url-credentials", "https://[redacted:url-credentials]@host/x"],
+    ['{"url":"https://bob:' + "pa/ss" + '@db.example/x","owner":"ops@example.com"}', "url-credentials", '{"url":"https://[redacted:url-credentials]@db.example/x","owner":"ops@example.com"}'],
+    ["[db](https://bob:" + "pa/ss" + "@db.example/x) ops@example.com", "url-credentials", "[db](https://[redacted:url-credentials]@db.example/x) ops@example.com"],
+    ["https://bob:" + "pw42" + "@", "url-credentials", "https://[redacted:url-credentials]@"],
+    // ...whatever script the host is written in.
+    ["https://bob:" + "pa/ss" + "@例え.テスト/x", "url-credentials", "https://[redacted:url-credentials]@例え.テスト/x"],
+    ["https://bob:" + "p?ss" + "@éxample.org/x", "url-credentials", "https://[redacted:url-credentials]@éxample.org/x"],
+    ["https://bob:" + "p#ss" + "@💩.la/x", "url-credentials", "https://[redacted:url-credentials]@💩.la/x"],
+    ["https://bob:" + "p@ss/w" + "@例え.テスト/x", "url-credentials", "https://[redacted:url-credentials]@例え.テスト/x"],
+    // Pinned over-redaction: host:port/path@x cannot be told from user:digits/password@host,
+    // so the path is redacted rather than risk the password.
+    ["https://host:8080/x@y", "url-credentials", "https://[redacted:url-credentials]@y"],
+    ["https://host.example:443/a@b", "url-credentials", "https://[redacted:url-credentials]@b"],
+  ];
+  for (const [text, pattern, expected] of cases) {
+    const r = redact(text);
+    assert.deepEqual(r.redactions, [{ line: 1, pattern }], text);
+    assert.equal(r.text, expected);
+    assert.deepEqual(redact(r.text), { text: r.text, redactions: [] }, `redacting again changes nothing: ${text}`);
+  }
+  // A comma-separated list: every URL is found. With no space between, the first userinfo may
+  // run on to the last @ of the token (a password may hold a /), and the spans merge.
+  const list = redact("https://app:" + "demo-one" + "@one.example, https://app:" + "demo-two" + "@two.example");
+  assert.equal(list.text, "https://[redacted:url-credentials]@one.example, https://[redacted:url-credentials]@two.example");
+  assert.deepEqual(list.redactions, [{ line: 1, pattern: "url-credentials" }, { line: 1, pattern: "url-credentials" }]);
+  const joined = redact("https://app:" + "demo-one" + "@one.example,https://app:" + "demo-two" + "@two.example");
+  assert.equal(joined.text, "https://[redacted:url-credentials]@two.example");
+  assert.deepEqual(joined.redactions, [{ line: 1, pattern: "url-credentials" }]);
+  const refs = redact("https://app:$ONE@one.example,https://app:" + "demo-two" + "@two.example");
+  assert.equal(refs.text, "https://app:$ONE@one.example,https://[redacted:url-credentials]@two.example");
+  // Overlapping userinfos merge into one span: the longer reading of the password wins.
+  const merged = redact("(https://a:" + "b/x" + ",https://c:" + "d@e/f)g" + "@h");
+  assert.equal(merged.text, "(https://[redacted:url-credentials]@h");
+  assert.deepEqual(merged.redactions, [{ line: 1, pattern: "url-credentials" }]);
+  assert.deepEqual(redact(merged.text), { text: merged.text, redactions: [] });
+});
+
+test("near-misses of the npm, Google, Bearer and URL patterns stay untouched", () => {
+  const text = [
+    "set npm_config_cache, or read npm_package_version; the npm_ prefix is npm's",
+    "AIza is a prefix, AIzaSyShort is too short",
+    "the bearer of bad news; Bearer tokens go in the Authorization header",
+    "Bearer authentication-scheme-description, bearer 12 apples",
+    "Authorization: Bearer $GITHUB_TOKEN and Authorization: Bearer <token>",
+    "git@github.com:awebai/oats-cloning.git, https://user@host.example/x, ssh://git@host.example/repo",
+    "mailto:someone@example.com, localhost:8080, http://localhost:8080/path",
+    "https://host/a:b@c and https://user@host/a:b@c have a colon in the path, not in a userinfo",
+    '"https://host:8080/x", "ops@example.com" and [link](https://host:8080/x) ops@example.com',
+    "'https://host:8080/x' and 'ops@example.com', <https://host:8080/x>@example.com, `https://host:8080/x`@y",
+    "https://$USER:$PASSWORD@host.example and https://app:$PASSWORD@db.example/main are references, not values",
+    "https://app:@db.example has an empty password; https://user@host.example:8080/x has none",
+    "https://${USER}:${PASSWORD}@db.example/main is a reference too",
+    "https://[::1]:8080/x and https://user@[2001:db8::1]/y have no password",
+    "(https://db.example:443),(ops@example.com) and (https://user@db.example:443),(ops@example.com) carry no credentials",
+  ].join("\n");
+  const r = redact(text);
+  assert.deepEqual(r.redactions, []);
+  assert.equal(r.text, text);
 });
 
 test("no false positives on SHAs, hex, UUIDs and ordinary prose", () => {

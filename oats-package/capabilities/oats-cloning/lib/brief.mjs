@@ -113,6 +113,85 @@ export function buildPreamble(p) {
   ].join("\n");
 }
 
+const isReference = (v) => /^(?:\$|<|\[redacted|\*{3,}|x{3,}$)/i.test(v);
+
+const URL_SCHEME = /\b[a-z][a-z0-9+.-]*:\/\//gi;
+// What ends a URL's authority: whitespace, the starts of path, query and
+// fragment, and what RFC 3986 never allows raw there ([ and ] only around an
+// IP-literal host, which the scanner reads whole).
+const URL_STOP = /[\s/?#"<>`{}|\\^[\]]/;
+// RFC 3986 IP-literal contents: IPv6 (with an optional %25 zone) or IPvFuture.
+const IP_LITERAL = /^(?:[0-9A-Fa-f:.]+(?:%25[0-9A-Za-z._~-]+)?|v[0-9A-Fa-f]+\.[0-9A-Za-z._~!$&'()*+,;=:-]+)$/;
+// What ends a URL's whole token in prose, JSON, Markdown and shells. A
+// password may hold any other character, / ? # included (base64 does).
+const TOKEN_STOP = /[\s"`<>]/;
+// What may follow the @ that ends a userinfo: the start of a host, any
+// character but a delimiter (internationalized names start with non-ASCII).
+const HOST_START = /[^\s"`<>'()@/?#]/;
+
+/** Credentials in URLs (scheme://user:password@host), one URL at a time.
+ *  Each URL's authority is bounded once: at a URL_STOP character, at the
+ *  closing ' of a URL opened by ', and at the ) that closes a URL opened by (
+ *  (balanced inner parentheses are part of it). A ${NAME} and a bracketed
+ *  IP-literal host ([::1]) are read whole. The userinfo runs to the last @ of
+ *  that authority (a raw @ in a password is still password). When the
+ *  authority holds a : the password may also hold a raw / ? # or other
+ *  URL_STOP character, so the scan goes on to the end of the URL's token
+ *  (TOKEN_STOP, or the opener's closer) and the userinfo runs to the last @
+ *  there that a host follows. The password alone decides: $USER:literal is
+ *  redacted, app:$PASSWORD is a reference. The whole userinfo is replaced;
+ *  the scheme and host stay. Without a password nothing is replaced. Spans
+ *  that overlap merge. Both extensions err toward redacting, never toward a
+ *  leak: a URL with a port and a later @ in its path (host:8080/x@y), and a
+ *  URL with no opener that runs into other text with no whitespace between,
+ *  can have that path or text redacted as if it were credentials. */
+function urlCredentials(text) {
+  const spans = [];
+  URL_SCHEME.lastIndex = 0;
+  for (let m; (m = URL_SCHEME.exec(text)); ) {
+    const start = m.index + m[0].length, opener = text[m.index - 1];
+    let end = start, depth = 0;
+    while (end < text.length) {
+      const c = text[end];
+      if (c === "$" && text[end + 1] === "{") {
+        const close = text.indexOf("}", end + 2);
+        if (close !== -1 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(text.slice(end + 2, close))) { end = close + 1; continue; }
+      }
+      if (c === "[" && (end === start || text[end - 1] === "@")) {
+        const close = text.indexOf("]", end + 1);
+        if (close !== -1 && IP_LITERAL.test(text.slice(end + 1, close))) { end = close + 1; continue; }
+      }
+      if (URL_STOP.test(c) || (opener === "'" && c === "'")) break;
+      if (c === "(") depth++;
+      else if (c === ")") { if (depth === 0 && opener === "(") break; depth = Math.max(0, depth - 1); }
+      end++;
+    }
+    // exec() resumes right after this scheme: a scheme inside this URL's
+    // bounds (a comma-separated list) is still found, and its span merges
+    // with this one's if they overlap.
+    let at = text.lastIndexOf("@", end - 1);
+    if (at < start) at = -1;
+    if (text.slice(start, end).includes(":")) {
+      for (let i = end; i < text.length; i++) {
+        const c = text[i];
+        if (TOKEN_STOP.test(c) || (opener === "'" && c === "'")) break;
+        if (c === "(") depth++;
+        else if (c === ")") { if (depth === 0 && opener === "(") break; depth = Math.max(0, depth - 1); }
+        else if (c === "@" && HOST_START.test(text[i + 1] ?? "")) at = i;
+      }
+    }
+    if (at === -1) continue;
+    const userinfo = text.slice(start, at), colon = userinfo.indexOf(":");
+    if (colon === -1) continue;
+    const password = userinfo.slice(colon + 1);
+    if (!password || isReference(password)) continue;
+    const last = spans.at(-1);
+    if (last && start < last.end) last.end = Math.max(last.end, at);
+    else spans.push({ start, end: at });
+  }
+  return spans;
+}
+
 /** Secret patterns (spec §5.3). A seatbelt, not the policy: /plan-clone's
  *  exclusions decide what a brief carries; this catches what slips through. */
 export const PATTERNS = [
@@ -124,6 +203,15 @@ export const PATTERNS = [
   { name: "aws-access-key-id", re: /\b(?:AKIA|ASIA|ABIA|ACCA|AGPA|AIDA|AIPA|ANPA|ANVA|APKA|AROA)[A-Z0-9]{16}\b/g },
   { name: "slack-token", re: /\bxox[abprs]-[A-Za-z0-9-]{10,}/g },
   { name: "jwt", re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
+  { name: "npm-token", re: /\bnpm_[A-Za-z0-9]{36}(?![A-Za-z0-9])/g },
+  { name: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g },
+  // Bearer tokens; only the token is replaced. In an Authorization header any
+  // RFC 6750 token is one, whatever its length or case. Bare "Bearer <x>" in
+  // prose must look like a token (20+ characters with a digit), so "the bearer
+  // of" never matches. References ($TOKEN, <token>) are never values.
+  { name: "bearer-token", re: /\b(Authorization["']?\s*:\s*["']?Bearer)(\s+)()([A-Za-z0-9._~+/-]+=*)(?![A-Za-z0-9._~+/=-])/gi, value: true },
+  { name: "bearer-token", re: /\b(bearer)(\s+)()((?=[A-Za-z0-9._~+/-]*\d)[A-Za-z0-9._~+/-]{20,}=*)(?![A-Za-z0-9._~+/=-])/gi, value: true },
+  { name: "url-credentials", spans: urlCredentials },
   // NAME=value / NAME: value for credential-shaped names. Only the value is
   // replaced; a reference ($VAR, <placeholder>) is not a value.
   { name: "secret-assignment", re: /\b((?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|TOKEN|SECRET|SECRET_ACCESS_KEY|PASSWORD|PASSWD|PRIVATE_KEY))(\s*[:=]\s*)(["']?)([^\s"'`]{4,})/g, value: true },
@@ -141,13 +229,20 @@ const lineAt = (text, offset) => {
 export function redact(text, { firstLine = 1 } = {}) {
   let out = text;
   const redactions = [];
-  for (const { name, re, value } of PATTERNS) {
+  for (const { name, re, value, spans } of PATTERNS) {
+    if (spans) {
+      // Single-line spans, replaced last to first so offsets stay valid.
+      const found = spans(out);
+      for (const { start } of found) redactions.push({ line: lineAt(out, start) + firstLine - 1, pattern: name });
+      for (const { start, end } of found.reverse()) out = `${out.slice(0, start)}[redacted:${name}]${out.slice(end)}`;
+      continue;
+    }
     out = out.replace(re, (...m) => {
       const offset = m.at(-2);
       const match = m[0];
       if (value) {
         const [, key, sep, quote, val] = m;
-        if (/^(?:\$|<|\[redacted|\*{3,}|x{3,}$)/i.test(val)) return match;
+        if (isReference(val)) return match;
         redactions.push({ line: lineAt(out, offset) + firstLine - 1, pattern: name });
         return `${key}${sep}${quote}[redacted:${name}]`;
       }

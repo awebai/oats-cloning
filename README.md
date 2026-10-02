@@ -58,9 +58,17 @@ change.
 
   It then verifies the file modes and the attachment's sha256.
 - **Secrets are redacted, not refused.** The brief and preamble are scanned
-  for private keys, GitHub, Anthropic, `sk-`, AWS and Slack tokens, JWTs and
-  `secret=…` style assignments. Every match is replaced. Only
-  `{line, pattern}` is reported, never the value.
+  for:
+  - private keys;
+  - GitHub, Anthropic, `sk-`, AWS, Slack and npm tokens;
+  - Google API keys;
+  - JWTs;
+  - `Authorization: Bearer` tokens (the token only);
+  - credentials in URLs (`scheme://user:pass@host` keeps its scheme and host);
+  - `secret=…` style assignments.
+
+  Every match is replaced. Only `{line, pattern}` is reported, never the
+  value.
 - **The transcript is read through a temporary record, never the host
   record.** It is included by default: asking for the clone is the consent,
   and `--transcript exclude` opts out. `dossier` runs
@@ -212,6 +220,14 @@ npm test        # validates the manifests, then runs every test
 - The secret scan covers PEM private keys, including aweb's own
   `.aw/signing.key` form (an `ED25519 PRIVATE KEY` block, as `aw` parses it).
   A bare key body without its PEM armour is not recognised.
+- A password may hold a raw `/`, `?` or `#`, so once a URL's authority has a
+  `:`, its userinfo runs to the last `@` before the URL ends (whitespace, `"`,
+  a backtick, `<`, `>`, or the `'` or `(` that opened it). A port followed by
+  a path with an `@` (`https://host:8080/x@y`), or a URL with no opening quote
+  or bracket that runs into other text with no whitespace between
+  (`https://db.example:443,(ops@example.com)`), can have that path or text
+  redacted as if it were credentials. Redaction errs toward over-redacting,
+  never toward a leak.
 - With oats.aweb 1.17.5, `oats session start` does not re-emit
   `AWEB_IDENTITY_HOME`. `spawn` then finds the clone's identity in its own
   `<home>/.aw` and reports a warning.
