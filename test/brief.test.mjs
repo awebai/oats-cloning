@@ -122,6 +122,17 @@ test("every pattern has a positive control, and each is redacted by name without
   }
 });
 
+test("aweb's key file form (the ED25519 PEM block aw parses from .aw/signing.key) is redacted whole, LF or CRLF", () => {
+  for (const eol of ["\n", "\r\n"]) {
+    const key = ["-----BEGIN " + "ED25519 PRIVATE KEY-----", "Zm9v" + "QmFy".repeat(10), "-----END " + "ED25519 PRIVATE KEY-----"].join(eol);
+    const text = `before\n${key}\nafter`;
+    const r = redact(text);
+    assert.deepEqual(r.redactions, [{ line: 2, pattern: "private-key" }], JSON.stringify(eol));
+    assert.ok(!r.text.includes("QmFy") && !r.text.includes("PRIVATE KEY"), "neither the body nor the armour survives");
+    assert.equal(r.text.split("\n").length, text.split("\n").length, "line numbering is kept");
+  }
+});
+
 test("assignment forms: PASSWORD, *_API_KEY, quoted values; references are not values", () => {
   const r = redact(["PASSWORD: hunter22x", 'AWEB_API_KEY="aw_ab12cd34"', "TOKEN=$GITHUB_TOKEN", "API_KEY=<ask the human>", "MY_SECRET=[redacted:x]"].join("\n"));
   assert.deepEqual(r.redactions, [{ line: 1, pattern: "secret-assignment" }, { line: 2, pattern: "secret-assignment" }]);

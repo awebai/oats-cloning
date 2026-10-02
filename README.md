@@ -209,7 +209,9 @@ npm test        # validates the manifests, then runs every test
 ## Known limitations
 
 - Local only: no remote sources, and no cloning of retired instances.
-- The secret scan has no aweb-specific key pattern. PEM keys are covered.
+- The secret scan covers PEM private keys, including aweb's own
+  `.aw/signing.key` form (an `ED25519 PRIVATE KEY` block, as `aw` parses it).
+  A bare key body without its PEM armour is not recognised.
 - With oats.aweb 1.17.5, `oats session start` does not re-emit
   `AWEB_IDENTITY_HOME`. `spawn` then finds the clone's identity in its own
   `<home>/.aw` and reports a warning.
