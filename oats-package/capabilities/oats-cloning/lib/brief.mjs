@@ -125,8 +125,9 @@ const IP_LITERAL = /^(?:[0-9A-Fa-f:.]+(?:%25[0-9A-Za-z._~-]+)?|v[0-9A-Fa-f]+\.[0
 // What ends a URL's whole token in prose, JSON, Markdown and shells. A
 // password may hold any other character, / ? # included (base64 does).
 const TOKEN_STOP = /[\s"`<>]/;
-// What may follow the @ that ends a userinfo: the start of a host.
-const HOST_START = /[A-Za-z0-9[$_%~-]/;
+// What may follow the @ that ends a userinfo: the start of a host, any
+// character but a delimiter (internationalized names start with non-ASCII).
+const HOST_START = /[^\s"`<>'()@/?#]/;
 
 /** Credentials in URLs (scheme://user:password@host), one URL at a time.
  *  Each URL's authority is bounded once: at a URL_STOP character, at the

@@ -188,6 +188,11 @@ test("npm, Google, Bearer and URL credentials: the forms that matter, each repor
     ['{"url":"https://bob:' + "pa/ss" + '@db.example/x","owner":"ops@example.com"}', "url-credentials", '{"url":"https://[redacted:url-credentials]@db.example/x","owner":"ops@example.com"}'],
     ["[db](https://bob:" + "pa/ss" + "@db.example/x) ops@example.com", "url-credentials", "[db](https://[redacted:url-credentials]@db.example/x) ops@example.com"],
     ["https://bob:" + "pw42" + "@", "url-credentials", "https://[redacted:url-credentials]@"],
+    // ...whatever script the host is written in.
+    ["https://bob:" + "pa/ss" + "@例え.テスト/x", "url-credentials", "https://[redacted:url-credentials]@例え.テスト/x"],
+    ["https://bob:" + "p?ss" + "@éxample.org/x", "url-credentials", "https://[redacted:url-credentials]@éxample.org/x"],
+    ["https://bob:" + "p#ss" + "@💩.la/x", "url-credentials", "https://[redacted:url-credentials]@💩.la/x"],
+    ["https://bob:" + "p@ss/w" + "@例え.テスト/x", "url-credentials", "https://[redacted:url-credentials]@例え.テスト/x"],
     // Pinned over-redaction: host:port/path@x cannot be told from user:digits/password@host,
     // so the path is redacted rather than risk the password.
     ["https://host:8080/x@y", "url-credentials", "https://[redacted:url-credentials]@y"],
