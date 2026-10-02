@@ -178,6 +178,20 @@ test("npm, Google, Bearer and URL credentials: the forms that matter, each repor
     // A bracketed IP-literal host is a host.
     ["https://app:" + "demo-pass-42" + "@[::1]:8443/main", "url-credentials", "https://[redacted:url-credentials]@[::1]:8443/main"],
     ["postgres://app:" + "demo-pass-42" + "@[2001:db8::1]:5432/main", "url-credentials", "postgres://[redacted:url-credentials]@[2001:db8::1]:5432/main"],
+    // A password may hold a raw / ? # (base64 does) or another character that ends an authority:
+    // the userinfo runs on to the last @ before the URL's token ends, if a host follows it.
+    ["git clone https://bob:" + "pa/ss" + "@github.com/x.git", "url-credentials", "git clone https://[redacted:url-credentials]@github.com/x.git"],
+    ["https://bob:" + "p?ss" + "@host/x", "url-credentials", "https://[redacted:url-credentials]@host/x"],
+    ["https://bob:" + "p#ss" + "@host/x", "url-credentials", "https://[redacted:url-credentials]@host/x"],
+    ["https://bob:" + "p@ss/w" + "@host/x", "url-credentials", "https://[redacted:url-credentials]@host/x"],
+    ["https://bob:" + "a^b|c\\d{e}[f]" + "@host/x", "url-credentials", "https://[redacted:url-credentials]@host/x"],
+    ['{"url":"https://bob:' + "pa/ss" + '@db.example/x","owner":"ops@example.com"}', "url-credentials", '{"url":"https://[redacted:url-credentials]@db.example/x","owner":"ops@example.com"}'],
+    ["[db](https://bob:" + "pa/ss" + "@db.example/x) ops@example.com", "url-credentials", "[db](https://[redacted:url-credentials]@db.example/x) ops@example.com"],
+    ["https://bob:" + "pw42" + "@", "url-credentials", "https://[redacted:url-credentials]@"],
+    // Pinned over-redaction: host:port/path@x cannot be told from user:digits/password@host,
+    // so the path is redacted rather than risk the password.
+    ["https://host:8080/x@y", "url-credentials", "https://[redacted:url-credentials]@y"],
+    ["https://host.example:443/a@b", "url-credentials", "https://[redacted:url-credentials]@b"],
   ];
   for (const [text, pattern, expected] of cases) {
     const r = redact(text);
@@ -185,10 +199,21 @@ test("npm, Google, Bearer and URL credentials: the forms that matter, each repor
     assert.equal(r.text, expected);
     assert.deepEqual(redact(r.text), { text: r.text, redactions: [] }, `redacting again changes nothing: ${text}`);
   }
-  // Every URL of a comma-separated list, with no space between.
-  const list = redact("https://app:" + "demo-one" + "@one.example,https://app:" + "demo-two" + "@two.example");
-  assert.equal(list.text, "https://[redacted:url-credentials]@one.example,https://[redacted:url-credentials]@two.example");
+  // A comma-separated list: every URL is found. With no space between, the first userinfo may
+  // run on to the last @ of the token (a password may hold a /), and the spans merge.
+  const list = redact("https://app:" + "demo-one" + "@one.example, https://app:" + "demo-two" + "@two.example");
+  assert.equal(list.text, "https://[redacted:url-credentials]@one.example, https://[redacted:url-credentials]@two.example");
   assert.deepEqual(list.redactions, [{ line: 1, pattern: "url-credentials" }, { line: 1, pattern: "url-credentials" }]);
+  const joined = redact("https://app:" + "demo-one" + "@one.example,https://app:" + "demo-two" + "@two.example");
+  assert.equal(joined.text, "https://[redacted:url-credentials]@two.example");
+  assert.deepEqual(joined.redactions, [{ line: 1, pattern: "url-credentials" }]);
+  const refs = redact("https://app:$ONE@one.example,https://app:" + "demo-two" + "@two.example");
+  assert.equal(refs.text, "https://app:$ONE@one.example,https://[redacted:url-credentials]@two.example");
+  // Overlapping userinfos merge into one span: the longer reading of the password wins.
+  const merged = redact("(https://a:" + "b/x" + ",https://c:" + "d@e/f)g" + "@h");
+  assert.equal(merged.text, "(https://[redacted:url-credentials]@h");
+  assert.deepEqual(merged.redactions, [{ line: 1, pattern: "url-credentials" }]);
+  assert.deepEqual(redact(merged.text), { text: merged.text, redactions: [] });
 });
 
 test("near-misses of the npm, Google, Bearer and URL patterns stay untouched", () => {
@@ -199,7 +224,10 @@ test("near-misses of the npm, Google, Bearer and URL patterns stay untouched", (
     "Bearer authentication-scheme-description, bearer 12 apples",
     "Authorization: Bearer $GITHUB_TOKEN and Authorization: Bearer <token>",
     "git@github.com:awebai/oats-cloning.git, https://user@host.example/x, ssh://git@host.example/repo",
-    "mailto:someone@example.com, localhost:8080, http://localhost:8080/path, https://host.example:443/a@b",
+    "mailto:someone@example.com, localhost:8080, http://localhost:8080/path",
+    "https://host/a:b@c and https://user@host/a:b@c have a colon in the path, not in a userinfo",
+    '"https://host:8080/x", "ops@example.com" and [link](https://host:8080/x) ops@example.com',
+    "'https://host:8080/x' and 'ops@example.com', <https://host:8080/x>@example.com, `https://host:8080/x`@y",
     "https://$USER:$PASSWORD@host.example and https://app:$PASSWORD@db.example/main are references, not values",
     "https://app:@db.example has an empty password; https://user@host.example:8080/x has none",
     "https://${USER}:${PASSWORD}@db.example/main is a reference too",
