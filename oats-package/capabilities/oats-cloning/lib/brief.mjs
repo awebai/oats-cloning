@@ -116,14 +116,18 @@ export function buildPreamble(p) {
 const isReference = (v) => /^(?:\$|<|\[redacted|\*{3,}|x{3,}$)/i.test(v);
 
 const URL_SCHEME = /\b[a-z][a-z0-9+.-]*:\/\//gi;
-// What never belongs to a URL's authority: whitespace, the starts of path,
-// query and fragment, and what RFC 3986 never allows raw.
+// What ends a URL's authority: whitespace, the starts of path, query and
+// fragment, and what RFC 3986 never allows raw there ([ and ] only around an
+// IP-literal host, which the scanner reads whole).
 const URL_STOP = /[\s/?#"<>`{}|\\^[\]]/;
+// RFC 3986 IP-literal contents: IPv6 (with an optional %25 zone) or IPvFuture.
+const IP_LITERAL = /^(?:[0-9A-Fa-f:.]+(?:%25[0-9A-Za-z._~-]+)?|v[0-9A-Fa-f]+\.[0-9A-Za-z._~!$&'()*+,;=:-]+)$/;
 
 /** Credentials in URLs (scheme://user:password@host), one URL at a time.
  *  Each URL's authority is bounded once: at a URL_STOP character, at the
  *  closing ' of a URL opened by ', and at the ) that closes a URL opened by (
- *  (balanced inner parentheses are part of it). A ${NAME} is read whole. The
+ *  (balanced inner parentheses are part of it). A ${NAME} and a bracketed
+ *  IP-literal host ([::1]) are read whole. The
  *  userinfo then runs to the last @ of that authority (a raw @ in a password is
  *  still password), and the password alone decides: $USER:literal is
  *  redacted, app:$PASSWORD is a reference. The whole userinfo is replaced;
@@ -142,18 +146,24 @@ function urlCredentials(text) {
         const close = text.indexOf("}", end + 2);
         if (close !== -1 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(text.slice(end + 2, close))) { end = close + 1; continue; }
       }
+      if (c === "[" && (end === start || text[end - 1] === "@")) {
+        const close = text.indexOf("]", end + 1);
+        if (close !== -1 && IP_LITERAL.test(text.slice(end + 1, close))) { end = close + 1; continue; }
+      }
       if (URL_STOP.test(c) || (opener === "'" && c === "'")) break;
       if (c === "(") depth++;
       else if (c === ")") { if (depth === 0 && opener === "(") break; depth = Math.max(0, depth - 1); }
       end++;
     }
-    URL_SCHEME.lastIndex = Math.max(URL_SCHEME.lastIndex, end);
+    // exec() resumes right after this scheme: a scheme inside this URL's
+    // bounds (a comma-separated list) is still found. A '/' ends the
+    // authority, so the next URL's userinfo is never inside this one's.
     const authority = text.slice(start, end), at = authority.lastIndexOf("@");
     if (at < 1 || at === authority.length - 1) continue;
     const userinfo = authority.slice(0, at), colon = userinfo.indexOf(":");
     if (colon === -1) continue;
     const password = userinfo.slice(colon + 1);
-    if (password && !isReference(password)) spans.push({ start, end: start + at });
+    if (password && !isReference(password) && !(spans.length && start < spans.at(-1).end)) spans.push({ start, end: start + at });
   }
   return spans;
 }

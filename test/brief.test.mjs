@@ -175,12 +175,20 @@ test("npm, Google, Bearer and URL credentials: the forms that matter, each repor
     // A ${NAME} username is read whole; balanced parentheses inside a URL opened by ( are its own.
     ["https://${USER}:" + "demo-pass-42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
     ["[db](https://app:" + "demo@(part)42" + "@db.example)", "url-credentials", "[db](https://[redacted:url-credentials]@db.example)"],
+    // A bracketed IP-literal host is a host.
+    ["https://app:" + "demo-pass-42" + "@[::1]:8443/main", "url-credentials", "https://[redacted:url-credentials]@[::1]:8443/main"],
+    ["postgres://app:" + "demo-pass-42" + "@[2001:db8::1]:5432/main", "url-credentials", "postgres://[redacted:url-credentials]@[2001:db8::1]:5432/main"],
   ];
   for (const [text, pattern, expected] of cases) {
     const r = redact(text);
     assert.deepEqual(r.redactions, [{ line: 1, pattern }], text);
     assert.equal(r.text, expected);
+    assert.deepEqual(redact(r.text), { text: r.text, redactions: [] }, `redacting again changes nothing: ${text}`);
   }
+  // Every URL of a comma-separated list, with no space between.
+  const list = redact("https://app:" + "demo-one" + "@one.example,https://app:" + "demo-two" + "@two.example");
+  assert.equal(list.text, "https://[redacted:url-credentials]@one.example,https://[redacted:url-credentials]@two.example");
+  assert.deepEqual(list.redactions, [{ line: 1, pattern: "url-credentials" }, { line: 1, pattern: "url-credentials" }]);
 });
 
 test("near-misses of the npm, Google, Bearer and URL patterns stay untouched", () => {
@@ -195,6 +203,7 @@ test("near-misses of the npm, Google, Bearer and URL patterns stay untouched", (
     "https://$USER:$PASSWORD@host.example and https://app:$PASSWORD@db.example/main are references, not values",
     "https://app:@db.example has an empty password; https://user@host.example:8080/x has none",
     "https://${USER}:${PASSWORD}@db.example/main is a reference too",
+    "https://[::1]:8080/x and https://user@[2001:db8::1]/y have no password",
     "(https://db.example:443),(ops@example.com) and (https://user@db.example:443),(ops@example.com) carry no credentials",
   ].join("\n");
   const r = redact(text);
