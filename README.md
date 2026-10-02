@@ -220,6 +220,10 @@ npm test        # validates the manifests, then runs every test
 - The secret scan covers PEM private keys, including aweb's own
   `.aw/signing.key` form (an `ED25519 PRIVATE KEY` block, as `aw` parses it).
   A bare key body without its PEM armour is not recognised.
+- A URL with no opening quote or bracket that runs into other text with no
+  whitespace between (`https://db.example:443,(ops@example.com)`) can have
+  that text redacted as if it were credentials. Redaction errs toward
+  over-redacting, never toward a leak.
 - With oats.aweb 1.17.5, `oats session start` does not re-emit
   `AWEB_IDENTITY_HOME`. `spawn` then finds the clone's identity in its own
   `<home>/.aw` and reports a warning.
