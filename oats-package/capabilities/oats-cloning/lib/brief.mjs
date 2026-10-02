@@ -126,13 +126,18 @@ export const PATTERNS = [
   { name: "jwt", re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
   { name: "npm-token", re: /\bnpm_[A-Za-z0-9]{36}(?![A-Za-z0-9])/g },
   { name: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g },
-  // The token after "Bearer", in a header or bare. Only the token is replaced;
-  // it must look like one (20+ token characters with a digit), so prose such
-  // as "the bearer of" and references ($TOKEN, <token>) never match.
-  { name: "bearer-token", re: /\b([Bb]earer)(\s+)()((?=[A-Za-z0-9._~+/-]*\d)[A-Za-z0-9._~+/-]{20,}=*)(?![A-Za-z0-9._~+/=-])/g, value: true },
-  // scheme://user:password@host: the userinfo goes, the scheme and host stay.
-  // Without a password (git@host:, https://user@host, ssh://git@host) nothing matches.
-  { name: "url-credentials", re: /\b([a-z][a-z0-9+.-]*:\/\/)()()([^\s:@/?#]*:[^\s@/?#]+)(?=@)/gi, value: true },
+  // Bearer tokens; only the token is replaced. In an Authorization header any
+  // RFC 6750 token is one, whatever its length or case. Bare "Bearer <x>" in
+  // prose must look like a token (20+ characters with a digit), so "the bearer
+  // of" never matches. References ($TOKEN, <token>) are never values.
+  { name: "bearer-token", re: /\b(Authorization["']?\s*:\s*["']?Bearer)(\s+)()([A-Za-z0-9._~+/-]+=*)(?![A-Za-z0-9._~+/=-])/gi, value: true },
+  { name: "bearer-token", re: /\b(bearer)(\s+)()((?=[A-Za-z0-9._~+/-]*\d)[A-Za-z0-9._~+/-]{20,}=*)(?![A-Za-z0-9._~+/=-])/gi, value: true },
+  // scheme://user:password@host: the whole userinfo goes, the scheme and host
+  // stay. The userinfo runs to the LAST @ of the authority (a raw @ in a
+  // password is still password), and whether it is a value is the password's
+  // call: $USER:literal is redacted, app:$PASSWORD is a reference. Without a
+  // password (git@host:, https://user@host, ssh://git@host) nothing matches.
+  { name: "url-credentials", re: /\b([a-z][a-z0-9+.-]*:\/\/)()()([^\s/?#:]*:([^\s/?#]*))(?=@)/gi, value: true, valueGroup: 5 },
   // NAME=value / NAME: value for credential-shaped names. Only the value is
   // replaced; a reference ($VAR, <placeholder>) is not a value.
   { name: "secret-assignment", re: /\b((?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|TOKEN|SECRET|SECRET_ACCESS_KEY|PASSWORD|PASSWD|PRIVATE_KEY))(\s*[:=]\s*)(["']?)([^\s"'`]{4,})/g, value: true },
@@ -150,13 +155,15 @@ const lineAt = (text, offset) => {
 export function redact(text, { firstLine = 1 } = {}) {
   let out = text;
   const redactions = [];
-  for (const { name, re, value } of PATTERNS) {
+  for (const { name, re, value, valueGroup } of PATTERNS) {
     out = out.replace(re, (...m) => {
       const offset = m.at(-2);
       const match = m[0];
       if (value) {
         const [, key, sep, quote, val] = m;
-        if (/^(?:\$|<|\[redacted|\*{3,}|x{3,}$)/i.test(val)) return match;
+        // The part that decides whether this is a value or a reference.
+        const decisive = valueGroup ? m[valueGroup] : val;
+        if (!decisive || /^(?:\$|<|\[redacted|\*{3,}|x{3,}$)/i.test(decisive)) return match;
         redactions.push({ line: lineAt(out, offset) + firstLine - 1, pattern: name });
         return `${key}${sep}${quote}[redacted:${name}]`;
       }

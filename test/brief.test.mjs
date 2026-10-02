@@ -113,7 +113,7 @@ const CONTROLS = {
 };
 
 test("every pattern has a positive control, and each is redacted by name without its value", () => {
-  assert.deepEqual(Object.keys(CONTROLS).sort(), PATTERNS.map((p) => p.name).sort());
+  assert.deepEqual(Object.keys(CONTROLS).sort(), [...new Set(PATTERNS.map((p) => p.name))].sort());
   for (const [name, secret] of Object.entries(CONTROLS)) {
     const text = `line one\nthe value: ${secret} end\nline three`;
     const r = redact(text);
@@ -156,6 +156,17 @@ test("npm, Google, Bearer and URL credentials: the forms that matter, each repor
     [`NPM_TOKEN=${npm}`, "npm-token", "NPM_TOKEN=[redacted:npm-token]"],
     ["git remote add origin https://" + "x-access-token:" + tok + "@github.com/acme/repo.git", "url-credentials", "git remote add origin https://[redacted:url-credentials]@github.com/acme/repo.git"],
     ["postgres://" + "app:" + "s3cret" + "@db.internal:5432/main", "url-credentials", "postgres://[redacted:url-credentials]@db.internal:5432/main"],
+    // An Authorization header is a credential whatever the token's length, digits or case.
+    ["Authorization: Bearer " + "mF_9.B5f-4.1JqM", "bearer-token", "Authorization: Bearer [redacted:bearer-token]"],
+    ["Authorization: Bearer " + "AbCdEfGhJkLmNpQrStUvWxYz".repeat(2), "bearer-token", "Authorization: Bearer [redacted:bearer-token]"],
+    ["Authorization: BEARER " + tok, "bearer-token", "Authorization: BEARER [redacted:bearer-token]"],
+    ['{"Authorization": "Bearer ' + "abc.def" + '"}', "bearer-token", '{"Authorization": "Bearer [redacted:bearer-token]"}'],
+    // The password decides: a variable or masked username does not shield a literal password.
+    ["https://$USER:" + "demo-pass-42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
+    ["https://***:" + "demo-pass-42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
+    // The userinfo runs to the last @ of the authority, raw or percent-encoded.
+    ["https://app:" + "demo@pass42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
+    ["https://app:" + "demo%40pass42" + "@db.example/main", "url-credentials", "https://[redacted:url-credentials]@db.example/main"],
   ];
   for (const [text, pattern, expected] of cases) {
     const r = redact(text);
@@ -173,7 +184,8 @@ test("near-misses of the npm, Google, Bearer and URL patterns stay untouched", (
     "Authorization: Bearer $GITHUB_TOKEN and Authorization: Bearer <token>",
     "git@github.com:awebai/oats-cloning.git, https://user@host.example/x, ssh://git@host.example/repo",
     "mailto:someone@example.com, localhost:8080, http://localhost:8080/path, https://host.example:443/a@b",
-    "https://$USER:$PASSWORD@host.example is a reference, not a value",
+    "https://$USER:$PASSWORD@host.example and https://app:$PASSWORD@db.example/main are references, not values",
+    "https://app:@db.example has an empty password; https://user@host.example:8080/x has none",
   ].join("\n");
   const r = redact(text);
   assert.deepEqual(r.redactions, []);
