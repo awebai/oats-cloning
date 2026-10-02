@@ -4,7 +4,7 @@
 
 First release.
 
-- `oats cloning request|consent|dossier|spawn` and the package soul
+- `oats cloning request|dossier|spawn` and the package soul
   `oats.cloning/cloner`: clone a local instance for a new goal, with the
   requester's relation, anchor, name, work base and transcript choice.
 - The brief reaches the clone as a 0600 attachment, never through TASK.md.
