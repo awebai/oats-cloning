@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { FIXED_NOW, SETTINGS, codeOf, lib, makeWorld } from "./helpers/world.mjs";
@@ -16,13 +16,14 @@ function body(request, extra = {}) {
   return HEADINGS.map((h) => `## ${h}\n\n${extra[h] ?? (h === "Your goal" ? request.goal : h === "What is verified" ? `- teal (${BODY_MARKER})` : "None.")}\n`).join("\n");
 }
 
-function setup(t, { request = makeRequest(), srcMeta = {}, srcWork = "directory", settings = SETTINGS } = {}) {
+function setup(t, { transcript = false, request = makeRequest(transcript ? { transcript: "include" } : {}), srcMeta = {}, srcWork = "directory", settings = SETTINGS } = {}) {
   const w = makeWorld(t);
-  w.addInstance({ name: "src-1", work: srcWork, meta: { work: srcWork, ...srcMeta }, files: { "STATE.md": "teal\n" } });
+  const srcHome = w.addInstance({ name: "src-1", work: srcWork, meta: { work: srcWork, ...srcMeta }, files: { "STATE.md": "teal\n" } });
   w.addInstance({ name: "lead-1", agent: "lead" });
   const cl = addCloner(w, request);
   const env = { ...cl.env, OATS_SETTINGS: JSON.stringify(settings) };
-  dossier(["src-1", "--transcript", "exclude"], { env, cwd: cl.home, now: FIXED_NOW });
+  if (transcript) w.setState({ capture: { [srcHome]: { complete: true, sessions: [{ thread: "cc:session:aaa", sessionId: "aaa", ids: ["t1:1", "t1:2"] }] } } });
+  dossier(["src-1", "--transcript", transcript ? "include" : "exclude"], { env, cwd: cl.home, now: FIXED_NOW });
   const clone = join(cl.home, "clone");
   const writeBrief = (text = body(request)) => writeFileSync(join(clone, "brief.md"), text);
   const writePlan = (over = {}) => {
@@ -63,8 +64,7 @@ test("spawn: an unlaunched clone, a preamble-only TASK.md (0600), the brief as a
   assert.equal(out.attachment.sha256, out.brief.sha256);
   const order = w.calls().filter((c) => ["spawn", "session"].includes(c.argv[0])).map((c) => c.argv[0] === "spawn" ? (c.argv.includes("--preview") ? "preview" : "apply") : c.argv[1]);
   assert.deepEqual(order, ["preview", "apply", "upload", "start"]);
-  for (const f of ["brief.md", "clone-task.md", "upload", "source", "dossier.json"]) assert.ok(!existsSync(join(clone, f)), `${f} is deleted after verification`);
-  for (const f of ["receipt.json", "request.json", "plan.json"]) assert.ok(existsSync(join(clone, f)), `${f} stays as the cloner's evidence`);
+  assert.deepEqual(readdirSync(clone), ["receipt.json"], "after the apply only the receipt stays: no source text survives into recovery storage");
   assert.ok(JSON.parse(readFileSync(join(clone, "receipt.json"), "utf8")).ok);
   for (const c of w.calls()) assert.ok(!c.env.some((k) => /^(AWEB_|PI_AGENT|OATS_INSTANCE)/.test(k)));
 });
@@ -229,5 +229,29 @@ test("checks that fail after the apply are E_CLONE_UNVERIFIED, naming the clone 
     assert.equal(err.details.clone, "worker-teal-port");
     assert.ok(err.details.checks.some((c) => c.check === check && !c.ok), `${check}: ${JSON.stringify(err.details.checks)}`);
     assert.ok(w.state().instances["worker-teal-port"]);
+    assert.deepEqual(readdirSync(join(w.agentsRoot, "acme-cloning--cloner", "instances", CLONER, "clone")), ["receipt.json"], `${check}: an unverified outcome is final too`);
   }
+});
+
+test("the temporary transcript record: kept through a preview, gone on a refusal (the brief stays), gone after the apply", (t) => {
+  const { w, clone, writePlan, writeBrief, run } = setup(t, { transcript: true });
+  const record = join(clone, "record");
+  assert.ok(existsSync(record), "dossier left the record for the cloner to read");
+  run(["--plan", writePlan(), "--preview"]);
+  assert.ok(existsSync(record), "a preview keeps it: the brief may still change");
+  writeBrief("not a brief\n");
+  assert.equal(codeOf(() => run()), "E_CLONE_BRIEF");
+  assert.ok(!existsSync(record), "a refusal removes it");
+  assert.ok(existsSync(join(clone, "brief.md")) && existsSync(join(clone, "dossier.json")), "a refusal before the apply is retryable");
+  assert.equal(w.state().spawned, undefined);
+});
+
+test("with the transcript included, the clone is verified and the record goes with the rest", (t) => {
+  const { clone, run } = setup(t, { transcript: true });
+  const out = run();
+  assert.ok(out.checks.every((c) => c.ok), JSON.stringify(out.checks));
+  assert.deepEqual(readdirSync(clone), ["receipt.json"]);
+  const task = readFileSync(join(out.clone.home, "TASK.md"), "utf8");
+  assert.match(task, /"thread": "cc:session:aaa"/);
+  assert.match(task, /from a temporary record that no longer exists/);
 });

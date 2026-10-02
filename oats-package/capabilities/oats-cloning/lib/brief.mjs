@@ -104,7 +104,7 @@ export function buildPreamble(p) {
       `You are not ${s}: never speak or sign as it. ` +
       `Its commitments, PRs, threads and children remain its own unless "Open threads and ownership" says they were handed to you. ` +
       `Items under "Working understanding" are provisional: verify them before you rely on them. ` +
-      `Turn ids cite ${s}'s transcript; read one with \`oats recall --show <id>\`. ` +
+      `Turn ids cite ${s}'s transcript as the cloner read it, from a temporary record that no longer exists: what matters is in the brief. ` +
       "Inherited material is not new evidence: put it in your own notes only after you re-verify it.",
     "",
     `Read your brief first: \`${BRIEF_PATH}\`. It holds your goal and what the cloner carried over. ` +

@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 import { fail } from "./errors.mjs";
 import { isSlug } from "./args.mjs";
+import { readRegularFile } from "./files.mjs";
 
 // request.json (spec §6.1) and the `oats-clone-request` block that carries it
-// in the cloner's TASK.md. The block's exact bytes are what consent binds to
-// (requestSha256), so it is generated once and never re-serialized.
+// in the cloner's TASK.md. The block's exact bytes are what the dossier binds
+// to (requestSha256), so it is generated once and never re-serialized.
 
 export const RELATIONS = ["unrelated", "child", "sibling", "parent"];
 export const HARNESSES = ["pi", "claude", "codex"];
@@ -78,4 +80,11 @@ export function checkGoal(bytes) {
   if (bytes.length > GOAL_MAX_BYTES) fail("E_CLONE_GOAL", `the goal is ${bytes.length} bytes; at most ${GOAL_MAX_BYTES}`);
   if (text.includes("\0")) fail("E_CLONE_GOAL", "the goal contains NUL");
   return text;
+}
+
+/** The cloner's own TASK.md, where the kernel put the request block. */
+export function readTaskRequest(home) {
+  const r = readRegularFile(join(home, "TASK.md"), 1024 * 1024);
+  if (!r.bytes) fail("E_CLONE_REQUEST", `no readable TASK.md in ${home}`);
+  return r.bytes.toString("utf8");
 }

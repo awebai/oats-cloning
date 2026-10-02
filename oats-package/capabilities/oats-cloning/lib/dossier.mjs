@@ -1,20 +1,21 @@
-import { lstatSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fail } from "./errors.mjs";
 import { parseArgs } from "./args.mjs";
-import { readSettings, requireInstance } from "./context.mjs";
+import { requireInstance } from "./context.mjs";
 import { kernelJson } from "./kernel.mjs";
 import { filterInstance, readStatus, resolveInstance } from "./instances.mjs";
-import { parseRequestBlock, sha256 } from "./request-format.mjs";
+import { parseRequestBlock, readTaskRequest, sha256 } from "./request-format.mjs";
 import { ensurePrivateDir, inside, readRegularFile, writeJson, writePrivate } from "./files.mjs";
-import { readConsent, readTaskRequest } from "./consent.mjs";
 import { directoryListing, gitWorkState } from "./workstate.mjs";
 
 // `oats cloning dossier <source>`: run by the cloner, read-only on the source.
-// Everything lands in <cloner home>/clone/, never work/. Retirement (kernel
+// Everything lands in <cloner home>/clone/, never work/: the transcript in a
+// temporary record (clone/record), the rest beside it. Retirement (kernel
 // 0.34) keeps a changed home in private recovery storage, so `spawn` deletes
-// clone/source/ and dossier.json once it applied, and a cloner that stops
-// without spawning deletes clone/ before it retires (/spawn-clone).
+// the record, clone/source/ and dossier.json, and a cloner that stops without
+// spawning deletes clone/ before it retires (/spawn-clone).
 
 export const FILE_MAX = 1024 * 1024, TOTAL_MAX = 4 * 1024 * 1024;
 const TOP_FILES = ["TASK.md", "STATE.md", "log.md"];
@@ -87,27 +88,62 @@ export function readWork(src, env) {
   return { mode, note: "not read in this work mode" };
 }
 
-export function readTranscript(src, ctx) {
-  const { value: cap } = kernelJson(["capture", "--home", src.home, "--quiet"], { ...ctx, timeout: 600000 });
-  if (!cap || typeof cap !== "object") fail("E_CLONE_KERNEL", "oats capture --home answered no object");
-  const sessions = [];
-  for (const s of Array.isArray(cap.sessions) ? cap.sessions : []) {
-    if (typeof s?.thread !== "string" || typeof s?.lastTurnId !== "string") continue;
-    const row = { thread: s.thread, sessionId: s.sessionId ?? null, source: s.source ?? null, lastTurnId: s.lastTurnId, turns: null };
-    try {
-      const { value } = kernelJson(["recall", "--thread", s.thread, "--json", "--ids-only", "--until", s.lastTurnId], { ...ctx, timeout: 120000 });
-      row.turns = Array.isArray(value?.turns) ? value.turns.length : null;
-    } catch (e) { row.error = e.code || "E_CLONE_KERNEL"; }
-    sessions.push(row);
+/** Where the source's transcript is captured for this clone: a temporary
+ *  record in the cloner's home, never the host record. The source may have
+ *  been told nothing of its session is captured, and cloning keeps that true. */
+export const RECORD_DIR = "record";
+const IGNORE_MAX = 1024 * 1024;
+
+/** Capture reads its ignore list from the root it writes, so the temporary
+ *  record carries a copy of the host's (TURN_RECORD_ROOT, else ~/.turn-record):
+ *  sessions the user excluded stay excluded. Unreadable is not "none". */
+function seedIgnore(recordDir, env) {
+  const hostRoot = env.TURN_RECORD_ROOT || join(env.HOME || homedir(), ".turn-record");
+  let text;
+  try {
+    if (statSync(join(hostRoot, "ignore")).size > IGNORE_MAX) return `${join(hostRoot, "ignore")} is over 1 MiB`;
+    text = readFileSync(join(hostRoot, "ignore"));
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    return `${join(hostRoot, "ignore")} could not be read (${e.code || e.message})`;
   }
-  return {
-    included: true,
-    status: typeof cap.status === "string" ? cap.status : "unknown",
-    complete: cap.complete === true,
-    sessions,
-    ...(typeof cap.error === "string" ? { error: cap.error } : {}),
-    ...(Array.isArray(cap.unattributed) ? { unattributed: cap.unattributed.length } : {}),
-  };
+  writePrivate(join(recordDir, "ignore"), text);
+  return null;
+}
+
+export function readTranscript(src, ctx, recordDir) {
+  rmSync(recordDir, { recursive: true, force: true });
+  ensurePrivateDir(recordDir);
+  let kept = false;
+  try {
+    const problem = seedIgnore(recordDir, ctx.env);
+    if (problem) return { included: true, status: "failed", complete: false, sessions: [], error: `${problem}; nothing was captured` };
+    const { value: cap } = kernelJson(["capture", "--home", src.home, "--root", recordDir, "--quiet"], { ...ctx, timeout: 600000 });
+    if (!cap || typeof cap !== "object") fail("E_CLONE_KERNEL", "oats capture --home answered no object");
+    const sessions = [];
+    for (const s of Array.isArray(cap.sessions) ? cap.sessions : []) {
+      if (typeof s?.thread !== "string" || typeof s?.lastTurnId !== "string") continue;
+      const row = { thread: s.thread, sessionId: s.sessionId ?? null, source: s.source ?? null, lastTurnId: s.lastTurnId, turns: null };
+      try {
+        const { value } = kernelJson(["recall", "--root", recordDir, "--thread", s.thread, "--json", "--ids-only", "--until", s.lastTurnId], { ...ctx, timeout: 120000 });
+        row.turns = Array.isArray(value?.turns) ? value.turns.length : null;
+      } catch (e) { row.error = e.code || "E_CLONE_KERNEL"; }
+      sessions.push(row);
+    }
+    kept = sessions.length > 0;
+    return {
+      included: true,
+      status: typeof cap.status === "string" ? cap.status : "unknown",
+      complete: cap.complete === true,
+      sessions,
+      ...(kept ? { record: recordDir } : {}),
+      ...(typeof cap.error === "string" ? { error: cap.error } : {}),
+      ...(Array.isArray(cap.unattributed) ? { unattributed: cap.unattributed.length } : {}),
+    };
+  } finally {
+    // Kept only while it holds something to read; `spawn` deletes it after.
+    if (!kept) rmSync(recordDir, { recursive: true, force: true });
+  }
 }
 
 export function dossier(argv, deps = {}) {
@@ -116,18 +152,14 @@ export function dossier(argv, deps = {}) {
   const source = positionals[0];
   if (!source) fail("E_CLONE_USAGE", "usage: oats cloning dossier <source-instance> [--transcript include|exclude] --json");
   const inv = requireInstance(env, cwd);
+  // Crash recovery: what an earlier run left (the source copies, a transcript
+  // record) goes before anything else is read, refusals included.
+  for (const leftover of ["source", RECORD_DIR]) rmSync(join(inv.home, "clone", leftover), { recursive: true, force: true });
   const { request, sha256: requestSha256 } = parseRequestBlock(readTaskRequest(inv.home));
   if (request.source !== source) fail("E_CLONE_REQUEST", `the request is for ${request.source}, not ${source}`);
   const transcript = flags.transcript ?? request.transcript;
   if (!["include", "exclude"].includes(transcript)) fail("E_CLONE_USAGE", "--transcript is include or exclude");
-  if (transcript === "include") {
-    if (request.transcript !== "include") fail("E_CLONE_TRANSCRIPT_CONSENT", `the requester excluded ${source}'s transcript; read it only if a new request includes it`);
-    if (!readConsent(inv.home, { requestSha256, source })) {
-      // The exact command, soul included: a cloner left to fill in the soul guesses wrong.
-      const command = `oats cloning consent ${inv.instance} --soul ${readSettings(env).cloner}`;
-      fail("E_CLONE_CONSENT", `no operator consent for reading ${source}'s transcript: the operator runs \`${command}\` from the deployment directory. Until then run dossier with --transcript exclude and build the rest`, { cloner: inv.instance, requestSha256, command });
-    }
-  }
+  if (transcript === "include" && request.transcript !== "include") fail("E_CLONE_TRANSCRIPT_CONSENT", `the requester excluded ${source}'s transcript; read it only if a new request includes it`);
 
   const ctx = { cwd: inv.home, env };
   const status = readStatus(ctx);
@@ -141,7 +173,8 @@ export function dossier(argv, deps = {}) {
 
   const files = copyHomeFiles(src.home, sourceDir);
   const work = readWork(src, env);
-  const transcriptRecord = transcript === "include" ? readTranscript(src, ctx) : { included: false };
+  const recordDir = join(cloneDir, RECORD_DIR);
+  const transcriptRecord = transcript === "include" ? readTranscript(src, ctx, recordDir) : { included: false };
   const doc = {
     version: 1,
     createdAt: now().toISOString(),
@@ -154,8 +187,10 @@ export function dossier(argv, deps = {}) {
     transcript: transcriptRecord,
   };
   const path = join(cloneDir, "dossier.json");
-  writeJson(path, doc);
-  writeJson(join(cloneDir, "request.json"), request);
+  try {
+    writeJson(path, doc);
+    writeJson(join(cloneDir, "request.json"), request);
+  } catch (e) { rmSync(recordDir, { recursive: true, force: true }); throw e; }
   const copied = files.entries.filter((f) => f.copied);
   return {
     dossier: path,
@@ -164,7 +199,7 @@ export function dossier(argv, deps = {}) {
       files: { copied: copied.length, bytes: files.copiedBytes, notCopied: files.entries.length - copied.length },
       work: { mode: work.mode, branch: work.branch ?? null, head: work.head ?? null, uncommitted: work.status?.total ?? null },
       transcript: transcriptRecord.included
-        ? { included: true, status: transcriptRecord.status, complete: transcriptRecord.complete, sessions: transcriptRecord.sessions.length, turns: transcriptRecord.sessions.reduce((n, s) => n + (s.turns ?? 0), 0) }
+        ? { included: true, status: transcriptRecord.status, complete: transcriptRecord.complete, sessions: transcriptRecord.sessions.length, turns: transcriptRecord.sessions.reduce((n, s) => n + (s.turns ?? 0), 0), record: transcriptRecord.record ?? null }
         : { included: false },
     },
   };

@@ -30,10 +30,11 @@ clone: an ordinary instance of the source's soul, related as requested
 ```
 
 - The **requester** chooses the goal, the relation and its anchor, the name,
-  the work base and whether the transcript may be read.
+  the work base, and whether to leave the transcript out.
 - The **cloner** decides what the clone carries. It reads the source's home
   files (TASK.md, STATE.md, log.md, `notes/**/*.md`), its work state (Git or
-  a directory listing) and, with consent, its transcript. It writes a brief
+  a directory listing) and its transcript, unless the request excludes it. It
+  writes a brief
   under eight fixed headings.
 - **`spawn`** turns the brief into the clone and proves it worked. It checks
   the plan against the request and the source: the soul, relation, anchor,
@@ -60,29 +61,35 @@ change.
   for private keys, GitHub, Anthropic, `sk-`, AWS and Slack tokens, JWTs and
   `secret=…` style assignments. Every match is replaced. Only
   `{line, pattern}` is reported, never the value.
-- **The transcript is excluded by default.** `--transcript include` is a
-  request, not consent.
-
-  Reading the transcript needs the **operator's** consent for that exact
-  request. The operator runs `oats cloning consent <cloner> --soul <cloner
-  soul>` from the deployment directory, or answers the prompt of an operator
-  `request … --transcript include` at a terminal. `dossier` refuses the
-  transcript until a matching `consent.json` exists.
-
-  **This is a procedural gate, not a security boundary.** The consent command
-  refuses inside an instance home or with `OATS_INSTANCE*` set, and every
-  agent-facing text forbids running it. Still, an agent with shell access on
-  the same host and user could forge the file. The gate makes consent
-  explicit and auditable; it does not make it impossible to bypass.
+- **The transcript is read through a temporary record, never the host
+  record.** It is included by default: asking for the clone is the consent,
+  and `--transcript exclude` opts out. `dossier` runs
+  `oats capture --home <source> --root <cloner home>/clone/record` (0700),
+  and every read is `oats recall --root` on that record. Nothing is written to
+  the host record (`TURN_RECORD_ROOT`, else `~/.turn-record`). So a source
+  that was told its session is not captured stays uncaptured. The host's
+  ignore list is copied into the temporary record so excluded sessions stay
+  excluded. If that list exists but can't be read, nothing is captured. The
+  clone gets the cloner's summary with turn ids as citations, never the
+  transcript.
 - **The clone gets its own messaging identity.** After the start, `spawn`
   checks that the clone's aweb alias is its own name, and that its did and
   identity home differ from the source's. It refuses before spawning when the
   deployment would give the clone a global (resident) identity.
 - **Nothing of the source outlives the cloner.** Retirement keeps a changed
-  home in private recovery storage. So once the apply has run, `spawn`
-  deletes `clone/source/`, `clone/dossier.json` and the brief. A cloner that
-  stops without spawning deletes `clone/` before it retires. The dossier
-  records transcript ids and counts only, never turn text.
+  home in private recovery storage. So:
+  - once the apply has run, whatever the checks say, `spawn` deletes
+    everything in `clone/` except `receipt.json`, which holds no source
+    text;
+  - a refusal before the apply keeps the cloner's brief and plan for a retry,
+    but deletes the temporary record;
+  - a cloner that stops without spawning deletes `clone/` before it retires;
+  - `dossier` first deletes any `clone/source` and `clone/record` left by an
+    earlier run.
+
+  **The limit:** a cloner killed mid-run and then retired from outside leaves
+  its `clone/` (the source copies and possibly the temporary record) in
+  recovery storage, which is 0700.
 - **The source is never written.** The dossier reads Git with
   `--no-optional-locks` and fsmonitor and untracked-cache off. It reads home
   files without following symlinks, within 1 MiB per file and 4 MiB in total.
@@ -128,8 +135,7 @@ they pass to it, so the relation is always set by explicit flags.
 | Command | Run by | Does |
 |---|---|---|
 | `request <source> (--goal …\|--goal-file …) --relation independent\|child\|sibling\|parent [--relative-to …] [--name …] [--transcript include\|exclude] [--base source\|default\|<ref>] [--harness …] [--model …] [--preview]` | an instance, or the operator with `--soul` | spawns the cloner with the request block |
-| `consent <cloner> --soul <cloner soul>` | the operator only, at a terminal | records consent for that request (0600) and wakes the cloner |
-| `dossier <source> [--transcript include\|exclude]` | the cloner | writes `clone/dossier.json`, `clone/request.json` and `clone/source/*` |
+| `dossier <source> [--transcript include\|exclude]` | the cloner | writes `clone/dossier.json`, `clone/request.json`, `clone/source/*` and, with the transcript, the temporary record `clone/record` |
 | `spawn --plan <plan.json> [--preview]` | the cloner | checks the plan, then preview, apply, upload, start and verify; writes `clone/receipt.json` |
 
 Errors (kernel refusals pass through with their own code under
@@ -145,8 +151,6 @@ Errors (kernel refusals pass through with their own code under
 | `E_CLONE_GOAL` | the goal is empty, not UTF-8 or over 8 KiB |
 | `E_CLONE_REQUEST` | the cloner's TASK.md holds no single valid request block, or the dossier's source is not the request's |
 | `E_CLONE_TRANSCRIPT_CONSENT` | the dossier asks for a transcript the request excluded |
-| `E_CLONE_CONSENT` | there is no matching operator consent, or the operator declined |
-| `E_CLONE_CONSENT_CONTEXT` | consent was run from an instance, or without a terminal |
 | `E_CLONE_PLAN` / `E_CLONE_SOUL` / `E_CLONE_HARVEST` | the plan is malformed, names a dossier for another request, or differs from the request or the source's posture |
 | `E_CLONE_BRIEF` | the brief's headings, the goal verbatim, its size or its encoding are wrong |
 | `E_CLONE_IDENTITY` | the clone would share, or did not get, its own messaging identity |
@@ -165,8 +169,7 @@ oats-package/
       context.mjs, kernel.mjs             invocation detection; the only path to the kernel
       instances.mjs                       resolving instances from `oats status`; the instance.json whitelist
       request.mjs, request-format.mjs     `request`; the request block in the cloner's TASK.md
-      consent.mjs, consent-command.mjs    consent.json and the operator command
-      dossier.mjs, workstate.mjs, files.mjs   `dossier`; read-only Git and file reading
+      dossier.mjs, workstate.mjs, files.mjs   `dossier`; the temporary transcript record; read-only Git and file reading
       brief.mjs                           brief checks, the generated preamble, redaction
       spawn.mjs                           plan checks, the attachment flow, verification
     skills/                               clone-instance (requester), read-instance, plan-clone, spawn-clone (cloner)
@@ -188,8 +191,13 @@ npm test        # validates the manifests, then runs every test
   kernel's answer shapes and refusals. When the kernel's behaviour changes,
   change the fake to match it first: a test that passes against a wrong fake
   proves nothing.
+- The fake models the record the way `packages/record` does. Capture writes
+  to `--root`, else `TURN_RECORD_ROOT`, else `~/.turn-record`, and honours
+  that root's ignore file. Recall reads only its own root.
 - `test/helpers/world.mjs` builds a deployment in a temp directory with
-  instances, homes and the kernel environment.
+  instances, homes and the kernel environment. It also builds a user home of
+  its own, so `world.hostRecord` is the host record a stray capture would
+  write. Tests assert that it never exists.
   `test/helpers/cloner.mjs` adds a cloner whose TASK.md holds a request.
 - The secret-pattern positive controls are assembled at runtime, so the
   repository holds no literal token.

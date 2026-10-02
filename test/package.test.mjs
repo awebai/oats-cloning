@@ -10,9 +10,9 @@ import { CAPABILITY_DIR } from "./helpers/world.mjs";
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(readFileSync(join(CAPABILITY_DIR, "oats.json"), "utf8"));
 
-test("the capability has no lifecycle hooks and exactly the four commands", () => {
+test("the capability has no lifecycle hooks and exactly the three commands", () => {
   assert.equal(manifest.hooks, undefined);
-  assert.deepEqual(Object.keys(manifest.commands).sort(), ["consent", "dossier", "request", "spawn"]);
+  assert.deepEqual(Object.keys(manifest.commands).sort(), ["dossier", "request", "spawn"]);
   for (const spec of Object.values(manifest.commands)) assert.match(spec, /^bin\/oats-cloning\.mjs [a-z]+$/);
   assert.equal(manifest.compatibility.oats, ">=0.34.0");
 });
@@ -20,7 +20,7 @@ test("the capability has no lifecycle hooks and exactly the four commands", () =
 test("the inject is short and says the three things", () => {
   const inject = readFileSync(join(CAPABILITY_DIR, manifest.inject), "utf8");
   assert.ok(inject.trim().split("\n").length < 12);
-  for (const needle of ["/clone-instance", "never your own initiative", "oats-clone-request", "/read-instance", "/plan-clone", "/spawn-clone", "consent"]) assert.ok(inject.includes(needle), needle);
+  for (const needle of ["/clone-instance", "never your own initiative", "oats-clone-request", "/read-instance", "/plan-clone", "/spawn-clone", "transcript"]) assert.ok(inject.includes(needle), needle);
 });
 
 test("each skill's frontmatter names its directory", () => {
@@ -42,12 +42,20 @@ test("the code never hard-codes the package id: the cloner soul comes from setti
   }
 });
 
-test("the agent-facing texts forbid running consent", () => {
+test("no operator-consent machinery is left in anything the package ships", () => {
+  const texts = [];
+  const walk = (dir) => { for (const e of readdirSync(dir, { withFileTypes: true })) e.isDirectory() ? walk(join(dir, e.name)) : texts.push([join(dir, e.name), readFileSync(join(dir, e.name), "utf8")]); };
+  walk(join(REPO, "oats-package"));
+  for (const [path, text] of texts) assert.doesNotMatch(text, /oats cloning consent|consent\.json|E_CLONE_CONSENT\b|E_CLONE_CONSENT_CONTEXT/, path);
+});
+
+test("the cloner reads the transcript only through its temporary record and clears clone/ when it stops", () => {
   const cloner = readFileSync(join(REPO, "oats-package", "souls", "cloner", "AGENTS.md"), "utf8");
-  const request = readFileSync(join(CAPABILITY_DIR, "skills", "clone-instance", "SKILL.md"), "utf8");
-  assert.match(cloner, /Never run `oats cloning consent`/);
-  assert.match(request, /Never run `oats cloning consent` yourself/);
-  assert.match(request, /procedural gate/);
+  const read = readFileSync(join(CAPABILITY_DIR, "skills", "read-instance", "SKILL.md"), "utf8");
+  assert.match(read, /R="\$OATS_INSTANCE_HOME\/clone\/record"/);
+  assert.doesNotMatch(read, /oats recall (?!--root)/, "every recall names the temporary record");
+  assert.match(cloner, /rm -rf "\$OATS_INSTANCE_HOME\/clone\/record" "\$OATS_INSTANCE_HOME\/clone\/source"/, "crash recovery at session start");
+  assert.match(cloner, /rm -rf "\$OATS_INSTANCE_HOME\/clone"/, "stopping without a clone");
 });
 
 function validateMutated(t, mutate) {

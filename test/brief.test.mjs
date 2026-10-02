@@ -80,7 +80,7 @@ const EXPECTED_PREAMBLE = `# Clone of src-1 — Port the teal theme to the setti
 
 ## You are a clone
 
-You are a new, separate instance of acme.pkg/worker, with your own identity and alias (your instance name). You continue from src-1's situated understanding, written by a cloner in your brief. You are not src-1: never speak or sign as it. Its commitments, PRs, threads and children remain its own unless "Open threads and ownership" says they were handed to you. Items under "Working understanding" are provisional: verify them before you rely on them. Turn ids cite src-1's transcript; read one with \`oats recall --show <id>\`. Inherited material is not new evidence: put it in your own notes only after you re-verify it.
+You are a new, separate instance of acme.pkg/worker, with your own identity and alias (your instance name). You continue from src-1's situated understanding, written by a cloner in your brief. You are not src-1: never speak or sign as it. Its commitments, PRs, threads and children remain its own unless "Open threads and ownership" says they were handed to you. Items under "Working understanding" are provisional: verify them before you rely on them. Turn ids cite src-1's transcript as the cloner read it, from a temporary record that no longer exists: what matters is in the brief. Inherited material is not new evidence: put it in your own notes only after you re-verify it.
 
 Read your brief first: \`.oats-attachments/clone-brief.md\`. It holds your goal and what the cloner carried over. It is private to this home (mode 0600): keep it there, and quote from it only what your work needs.
 `;

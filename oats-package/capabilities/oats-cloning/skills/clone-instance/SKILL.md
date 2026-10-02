@@ -6,7 +6,7 @@ description: >-
   related as you choose (independent, child, sibling or parent). Covers when
   to clone and when not, the choices that are yours (goal, relation, anchor,
   name, transcript, work base), running `oats cloning request` from an
-  instance or from the deployment, transcript consent, and what comes back.
+  instance or from the deployment, the transcript, and what comes back.
   Use when your human or your task asks for a clone of an instance.
 ---
 
@@ -41,7 +41,7 @@ These are yours; the cloner decides everything else (what the brief carries).
 | relation | `--relation independent\|child\|sibling\|parent` | Required, no default. |
 | anchor | `--relative-to <instance>` | For child, sibling or parent. Defaults to the source. Not allowed with `independent`. Never the cloner. |
 | name | `--name <slug>` | The clone's exact name. Without it the cloner picks a purpose. |
-| transcript | `--transcript include\|exclude` | Default `exclude`. See consent below. |
+| transcript | `--transcript include\|exclude` | Default `include`. See the transcript below. |
 | work base | `--base source\|default\|<ref>` | Worktree sources only. `source` starts from the source's branch; `default` from the soul's default. Without it the cloner decides. |
 | launch | `--harness`, `--model` | Defaults to the source's. |
 
@@ -71,29 +71,24 @@ oats cloning request <source> --goal "…" --relation independent --soul oats.cl
 
 The cloner is then operator-origin and reports in its own terminal.
 
-## Transcript consent
+## The transcript
 
-The source's session transcript is its private conversation. Reading it needs
-the operator's consent, **for each clone**:
+The source's session transcript is its private conversation. By default the
+cloner reads it, because asking for the clone is the consent. Use
+`--transcript exclude` when the source's conversation should stay out of the
+clone, for example when it holds a third party's material the new goal
+doesn't need. Deciding to include it is your human's or your task's call,
+like the clone itself.
 
-- `--transcript include` is a request, not consent.
-- From an instance, the answer carries `consent.status: "required"` and the
-  exact command. Ask your human to run it from the deployment directory:
-  `oats cloning consent <cloner> --soul <cloner soul>`. It shows them the
-  request and asks for confirmation on their terminal, then wakes the cloner.
-- From the deployment, `request … --transcript include` asks the operator
-  inline and records the same consent.
-- Until consent arrives, the cloner builds the brief from everything else and
-  tells you consent is pending.
-
-**Never run `oats cloning consent` yourself**, and never write or edit
-`clone/consent.json`. This is a procedural gate: agents running as the same
-OS user are not cryptographically prevented from it. It holds because no
-agent does it.
+The cloner reads it through a **temporary record** in its own home, never
+the host record: a source that was told its session is not captured stays
+uncaptured. The host's ignore list is honoured. The record is deleted once
+the clone is made. The clone gets the cloner's summary with turn ids as
+citations, never the transcript itself.
 
 ## What comes back
 
-`request` answers `{ ok, cloner: { instance, home }, request, consent? }`.
+`request` answers `{ ok, cloner: { instance, home }, request, requestSha256 }`.
 The cloner then reports to you by aweb mail (or, operator-origin, in its own
 terminal): the clone's name, home and relation, the brief's size and sha256,
 how many secrets were redacted, what was not carried, and caveats such as an

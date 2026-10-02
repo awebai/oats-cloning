@@ -70,7 +70,9 @@ section with nothing in it says `None.`
 - **Not carried**: what you deliberately left out and why, without
   reproducing it.
 
-Cite turns by id (`oats recall --show <id>` reads one). Phrase provisional
+Cite turns by id. The ids are citations only: the clone can't read them,
+because your temporary record is deleted once the clone is made. So the brief
+itself carries whatever the clone needs from a turn. Phrase provisional
 items as provisional. Write for a capable reader who has none of your
 context.
 

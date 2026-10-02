@@ -1,7 +1,7 @@
 {
   "package": "oats.cloning",
   "version": "1.0.0",
-  "description": "Official OATS instance cloning: the oats.cloning capability (request, consent, dossier, spawn) and the cloner package soul that reads a source instance and spawns its clone for a new goal.",
+  "description": "Official OATS instance cloning: the oats.cloning capability (request, dossier, spawn) and the cloner package soul that reads a source instance and spawns its clone for a new goal.",
   "compatibility": {
     "oats": ">=0.34.0"
   },

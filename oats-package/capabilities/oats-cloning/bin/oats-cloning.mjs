@@ -1,17 +1,16 @@
 #!/usr/bin/env node
-// oats cloning request|consent|dossier|spawn: the oats.cloning commands.
+// oats cloning request|dossier|spawn: the oats.cloning commands.
 // Run through the kernel (`oats cloning …`), which sets OATS_CLI_BIN,
 // OATS_SETTINGS and, inside an instance, OATS_INSTANCE / OATS_INSTANCE_HOME.
 // With --json each prints exactly one envelope: { ok: true, … } or
 // { ok: false, error: { code, message, details? } }, exiting nonzero on failure.
 import { CloneError } from "../lib/errors.mjs";
 import { request } from "../lib/request.mjs";
-import { consent } from "../lib/consent-command.mjs";
 import { dossier } from "../lib/dossier.mjs";
 import { spawnClone } from "../lib/spawn.mjs";
 import { summarize } from "../lib/human.mjs";
 
-const COMMANDS = { request, consent, dossier, spawn: spawnClone };
+const COMMANDS = { request, dossier, spawn: spawnClone };
 const [command, ...argv] = process.argv.slice(2);
 const json = argv.includes("--json");
 

@@ -8,7 +8,6 @@ import { kernelEnvelope } from "./kernel.mjs";
 import { readStatus, resolveInstance } from "./instances.mjs";
 import { HARNESSES, normalizeRelation, checkGoal, clonerTask, parseRequestBlock } from "./request-format.mjs";
 import { readRegularFile, writePrivate } from "./files.mjs";
-import { confirmOnTerminal, consentSummary, writeConsent } from "./consent.mjs";
 
 const MAX_NAME = 64;
 
@@ -51,7 +50,8 @@ export function request(argv, deps = {}) {
   } else fail("E_CLONE_GOAL", "a goal is required: --goal <text> or --goal-file <path>");
   const goal = checkGoal(goalBytes);
 
-  const transcript = flags.transcript ?? "exclude";
+  // Default include: the requester's request is the consent (spec §0 R2c).
+  const transcript = flags.transcript ?? "include";
   if (!["include", "exclude"].includes(transcript)) fail("E_CLONE_USAGE", "--transcript is include or exclude");
   if (flags.harness !== undefined && !HARNESSES.includes(flags.harness)) fail("E_CLONE_USAGE", "--harness is pi, claude or codex");
   if (flags.model !== undefined && !flags.model.trim()) fail("E_CLONE_USAGE", "--model needs a model");
@@ -80,14 +80,6 @@ export function request(argv, deps = {}) {
   const task = clonerTask(req);
   const { sha256: requestSha256 } = parseRequestBlock(task);
 
-  // A request the operator makes from the deployment with the transcript
-  // included is its own consent, confirmed on the terminal like `consent`.
-  const consentInline = inv.kind === "operator" && transcript === "include" && !flags.preview;
-  if (consentInline) {
-    const yes = confirmOnTerminal(consentSummary(req, null), `Allow the cloner to read ${source}'s transcript?`, deps.io);
-    if (!yes) fail("E_CLONE_CONSENT", "consent declined; nothing was spawned");
-  }
-
   const dir = mkdtempSync(join(deps.tmpdir ?? tmpdir(), "oats-cloning-"));
   chmodSync(dir, 0o700);
   try {
@@ -95,7 +87,6 @@ export function request(argv, deps = {}) {
     const spawnArgs = (purpose) => [
       "spawn", settings.cloner, "--purpose", purpose, "--task-file", taskFile, "--json",
       ...(inv.kind === "instance" ? ["--parent", inv.instance] : []),
-      ...(consentInline ? ["--no-launch"] : []),
     ];
     let purpose = clonerPurpose(settings.cloner, source);
     let preview;
@@ -113,25 +104,7 @@ export function request(argv, deps = {}) {
     if (flags.preview) return { preview: planned, request: req, requestSha256 };
 
     const applied = kernelEnvelope([...spawnArgs(purpose), "--expect-decision", revision], { ...ctx, timeout: 600000 });
-    const cloner = { instance: applied.instance, home: applied.home };
-    const answer = { cloner, request: req, requestSha256 };
-    if (transcript === "include") {
-      answer.consent = consentInline
-        ? { status: "given", by: "operator" }
-        : { status: "required", command: `oats cloning consent ${cloner.instance} --soul ${settings.cloner}`, note: "the operator runs this from the deployment directory; no agent may run it" };
-    }
-    if (consentInline) {
-      // The cloner was scaffolded unlaunched so its consent exists before it
-      // can run dossier; a failure from here on leaves it for the operator.
-      try {
-        writeConsent(cloner.home, { requestSha256, source }, now());
-        kernelEnvelope(["session", "start", "--home", cloner.home, "--json"], { ...ctx, timeout: 300000 });
-      } catch (e) {
-        if (e instanceof CloneError) { e.details = { ...(e.details || {}), cloner }; throw e; }
-        fail("E_CLONE_KERNEL", `cloner ${cloner.instance} was spawned but not started: ${e.message}`, { cloner });
-      }
-    }
-    return answer;
+    return { cloner: { instance: applied.instance, home: applied.home }, request: req, requestSha256 };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

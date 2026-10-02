@@ -8,9 +8,8 @@ import { CLONER, addCloner, makeRequest } from "./helpers/cloner.mjs";
 
 const { dossier } = await lib("dossier");
 const { filterInstance } = await lib("instances");
-const { writeConsent } = await lib("consent");
 
-function setup(t, { request = makeRequest(), consent = false, srcFiles, srcMeta, work = "directory" } = {}) {
+function setup(t, { request = makeRequest(), srcFiles, srcMeta, work = "directory" } = {}) {
   const w = makeWorld(t);
   const srcHome = w.addInstance({ name: "src-1", work, meta: srcMeta, files: srcFiles ?? {
     "TASK.md": "# Instance briefing\n\n## Task\n\nPick a colour.\n",
@@ -24,7 +23,7 @@ function setup(t, { request = makeRequest(), consent = false, srcFiles, srcMeta,
     "work/readme.txt": "work file contents\n",
   } });
   w.addInstance({ name: "lead-1", agent: "lead" });
-  const cl = addCloner(w, request, { consent });
+  const cl = addCloner(w, request);
   const run = (argv = ["src-1", "--json"], env = cl.env) => dossier(argv, { env, cwd: cl.home, now: FIXED_NOW });
   return { w, srcHome, cl, run };
 }
@@ -42,38 +41,77 @@ test("a cloner never clones itself", (t) => {
   assert.equal(codeOf(() => run([CLONER])), "E_CLONE_SOURCE");
 });
 
-test("the transcript: excluded by the request, or without the operator's matching consent, is refused", (t) => {
-  const a = setup(t);
-  assert.equal(codeOf(() => a.run(["src-1", "--transcript", "include"])), "E_CLONE_TRANSCRIPT_CONSENT");
-  const b = setup(t, { request: makeRequest({ transcript: "include" }) });
-  assert.equal(codeOf(() => b.run()), "E_CLONE_CONSENT", "the request's include is not consent");
-  assert.throws(() => b.run(), (e) => e.details.command === `oats cloning consent ${CLONER} --soul acme.cloning/cloner` && e.message.includes(e.details.command), "the exact command, soul included");
-  writeConsent(b.cl.home, { requestSha256: "0".repeat(64), source: "src-1" });
-  assert.equal(codeOf(() => b.run()), "E_CLONE_CONSENT", "consent for another request");
-  const out = b.run(["src-1", "--transcript", "exclude"]);
-  assert.equal(out.summary.transcript.included, false, "everything else can be built while consent is pending");
-  assert.ok(!b.w.calls().some((c) => c.argv[0] === "capture"), "no transcript was read");
+const SESSIONS = [{ thread: "cc:session:aaa", sessionId: "aaa", ids: ["t1:1", "t1:2", "t1:3"] }, { thread: "cc:session:bbb", sessionId: "bbb", ids: ["t1:9"] }];
+const included = () => makeRequest({ transcript: "include" });
+const recordOf = (cl) => join(cl.home, "clone", "record");
+
+test("a transcript the request excluded is refused, and nothing is captured", (t) => {
+  const { w, run } = setup(t);
+  assert.equal(codeOf(() => run(["src-1", "--transcript", "include"])), "E_CLONE_TRANSCRIPT_CONSENT");
+  const out = run();
+  assert.equal(out.summary.transcript.included, false);
+  assert.ok(!w.calls().some((c) => c.argv[0] === "capture"));
 });
 
-test("with consent the transcript is bounded by capture and counted with recall, not copied", (t) => {
-  const { w, srcHome, run } = setup(t, { request: makeRequest({ transcript: "include" }), consent: true });
-  w.setState({ capture: { [srcHome]: { complete: false, sessions: [{ thread: "cc:session:aaa", sessionId: "aaa", ids: ["t1:1", "t1:2", "t1:3"] }, { thread: "cc:session:bbb", sessionId: "bbb", ids: ["t1:9"] }] } } });
+test("an included transcript is captured into a temporary 0700 record in the cloner's home, never the host record", (t) => {
+  const { w, cl, srcHome, run } = setup(t, { request: included() });
+  w.setState({ capture: { [srcHome]: { complete: false, sessions: SESSIONS } } });
   const out = run();
+  const record = recordOf(cl);
   const doc = JSON.parse(readFileSync(out.dossier, "utf8"));
   assert.equal(doc.transcript.status, "incomplete");
   assert.equal(doc.transcript.complete, false, "an incomplete capture is recorded, not hidden");
   assert.deepEqual(doc.transcript.sessions.map((s) => [s.thread, s.lastTurnId, s.turns]), [["cc:session:aaa", "t1:3", 3], ["cc:session:bbb", "t1:9", 1]]);
-  const recalls = w.calls().filter((c) => c.argv[0] === "recall");
-  assert.deepEqual(recalls[0].argv, ["recall", "--thread", "cc:session:aaa", "--json", "--ids-only", "--until", "t1:3"]);
-  assert.deepEqual(w.calls().find((c) => c.argv[0] === "capture").argv, ["capture", "--home", srcHome, "--quiet"]);
+  assert.equal(doc.transcript.record, record);
+  assert.equal(out.summary.transcript.record, record);
+  assert.deepEqual(w.calls().find((c) => c.argv[0] === "capture").argv, ["capture", "--home", srcHome, "--root", record, "--quiet"]);
+  assert.deepEqual(w.calls().find((c) => c.argv[0] === "recall").argv, ["recall", "--root", record, "--thread", "cc:session:aaa", "--json", "--ids-only", "--until", "t1:3"]);
+  assert.equal(statSync(record).mode & 0o777, 0o700);
+  assert.ok(!existsSync(w.hostRecord), "the host record was never written");
 });
 
-test("a failed capture is recorded as failed", (t) => {
-  const { run } = setup(t, { request: makeRequest({ transcript: "include" }), consent: true });
+test("the host's ignore list is carried into the temporary record, from TURN_RECORD_ROOT when set", (t) => {
+  const { w, cl, srcHome, run } = setup(t, { request: included() });
+  w.setState({ capture: { [srcHome]: { complete: true, sessions: SESSIONS } } });
+  mkdirSync(w.hostRecord, { recursive: true });
+  writeFileSync(join(w.hostRecord, "ignore"), "bbb\n");
+  let doc = JSON.parse(readFileSync(run().dossier, "utf8"));
+  assert.deepEqual(doc.transcript.sessions.map((s) => s.thread), ["cc:session:aaa"], "the session the user excluded stays excluded");
+  assert.equal(readFileSync(join(recordOf(cl), "ignore"), "utf8"), "bbb\n");
+  assert.equal(statSync(join(recordOf(cl), "ignore")).mode & 0o777, 0o600);
+  const custom = join(w.root, "custom-record");
+  mkdirSync(custom);
+  writeFileSync(join(custom, "ignore"), "aaa\n");
+  doc = JSON.parse(readFileSync(run(["src-1", "--json"], { ...cl.env, TURN_RECORD_ROOT: custom }).dossier, "utf8"));
+  assert.deepEqual(doc.transcript.sessions.map((s) => s.thread), ["cc:session:bbb"]);
+});
+
+test("a host ignore list that exists but cannot be read means no capture at all", (t) => {
+  const { w, cl, srcHome, run } = setup(t, { request: included() });
+  w.setState({ capture: { [srcHome]: { complete: true, sessions: SESSIONS } } });
+  mkdirSync(join(w.hostRecord, "ignore"), { recursive: true });
+  const doc = JSON.parse(readFileSync(run().dossier, "utf8"));
+  assert.equal(doc.transcript.status, "failed");
+  assert.match(doc.transcript.error, /could not be read \(EISDIR\); nothing was captured/);
+  assert.ok(!w.calls().some((c) => c.argv[0] === "capture"));
+  assert.ok(!existsSync(recordOf(cl)));
+});
+
+test("a failed capture is recorded as failed and leaves no record", (t) => {
+  const { cl, run } = setup(t, { request: included() });
   const doc = JSON.parse(readFileSync(run().dossier, "utf8"));
   assert.equal(doc.transcript.status, "failed");
   assert.equal(doc.transcript.complete, false);
   assert.deepEqual(doc.transcript.sessions, []);
+  assert.equal(doc.transcript.record, undefined);
+  assert.ok(!existsSync(recordOf(cl)));
+});
+
+test("an earlier run's leftovers (source copies, transcript record) go first, even when the run is refused", (t) => {
+  const { cl, run } = setup(t);
+  for (const d of ["record", "source"]) { mkdirSync(join(cl.home, "clone", d), { recursive: true }); writeFileSync(join(cl.home, "clone", d, "x"), "old"); }
+  assert.equal(codeOf(() => run(["other-1"])), "E_CLONE_REQUEST");
+  assert.ok(!existsSync(recordOf(cl)) && !existsSync(join(cl.home, "clone", "source")));
 });
 
 test("only TASK.md, STATE.md, log.md and notes/**/*.md are copied, 0600, each with its sha256", (t) => {

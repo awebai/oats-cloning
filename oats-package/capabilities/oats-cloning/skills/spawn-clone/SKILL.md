@@ -50,8 +50,14 @@ The command previews again, applies the same decision, and then:
    is its own (alias = its name; identity home and did differ from the
    source's).
 
-It writes `clone/receipt.json` and deletes your working copies of the brief,
-the source copies and the dossier.
+It writes `clone/receipt.json` and then deletes everything else in `clone/`:
+your brief and plan, the dossier, the source copies and the temporary
+transcript record. That happens whether the checks pass or not.
+
+A refusal **before** the apply (any error below except the unverified and
+post-spawn identity ones) keeps your brief and plan so you can fix them and
+retry. It does delete the transcript record, so if you still need the
+transcript, run `oats cloning dossier <source> --json` again first.
 
 ## 3. Errors
 
@@ -91,11 +97,10 @@ Also on `E_CLONE_UNVERIFIED` and a post-spawn `E_CLONE_IDENTITY`: report,
 then retire yourself, but **never** retire the clone. Your `work/` stays
 empty.
 
-Retirement keeps a changed home in recovery storage. Once the apply ran,
-`spawn` has already deleted `clone/source/`, `clone/dossier.json` and your
-brief; `receipt.json`, `request.json` and `plan.json` stay as your evidence.
-If you stop **without** spawning (a refusal you cannot resolve, a withdrawn
-request), first delete what you gathered, then retire:
+Retirement keeps a changed home in recovery storage. Once the apply has run,
+`spawn` has already emptied `clone/` except `receipt.json`, which holds no
+source text. If you stop **without** spawning (a refusal you cannot resolve, a
+withdrawn request), first delete what you gathered, then retire:
 
 ```bash
 rm -rf "$OATS_INSTANCE_HOME/clone"

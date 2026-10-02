@@ -27,11 +27,15 @@ export function makeWorld(t, { souls = ["worker", CLONER_SOUL], launchConfigs = 
   const statePath = join(root, "fake-state.json"), logPath = join(root, "fake-log.jsonl");
   const tmp = join(root, "tmp");
   mkdirSync(tmp);
+  // The user's home for this world: its ~/.turn-record is the host record a
+  // capture without --root would write, and must never be the real one.
+  const userHome = join(root, "user-home"), hostRecord = join(userHome, ".turn-record");
+  mkdirSync(userHome);
   writeFileSync(statePath, JSON.stringify({ agentsRoot, instances: {}, souls, launchConfigs, capture: {} }));
   writeFileSync(logPath, "");
 
   const world = {
-    root, deployment, agentsRoot, statePath, logPath, tmp,
+    root, deployment, agentsRoot, statePath, logPath, tmp, userHome, hostRecord,
     state: () => JSON.parse(readFileSync(statePath, "utf8")),
     setState(patch) { writeFileSync(statePath, JSON.stringify({ ...world.state(), ...patch })); },
     calls: () => readFileSync(logPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)),
@@ -72,7 +76,7 @@ export function makeWorld(t, { souls = ["worker", CLONER_SOUL], launchConfigs = 
      *  that must never reach a kernel call. */
     env({ instance, home, settings = SETTINGS } = {}) {
       return {
-        PATH: process.env.PATH, HOME: process.env.HOME,
+        PATH: process.env.PATH, HOME: userHome,
         OATS_CLI_BIN: FAKE_OATS, OATS_SETTINGS: JSON.stringify(settings), OATS_SETTINGS_ORIGINS: "{}",
         OATS_CAPABILITY: "oats.cloning",
         FAKE_OATS_STATE: statePath, FAKE_OATS_LOG: logPath,

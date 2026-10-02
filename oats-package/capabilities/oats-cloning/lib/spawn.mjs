@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, lstatSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, lstatSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { CloneError, fail } from "./errors.mjs";
 import { isSlug, parseArgs } from "./args.mjs";
@@ -8,8 +8,9 @@ import { kernelEnv, kernelEnvelope } from "./kernel.mjs";
 import { filterInstance, identityHomeOf, instanceIndex, readInstanceJson, readStatus, resolveInstance, soulOf } from "./instances.mjs";
 import { RELATIONS, HARNESSES, normalizeRelation, parseRequestBlock, sha256 } from "./request-format.mjs";
 import { containedPath, ensurePrivateDir, inside, readRegularFile, writeJson, writePrivate } from "./files.mjs";
-import { readTaskRequest } from "./consent.mjs";
+import { readTaskRequest } from "./request-format.mjs";
 import { BRIEF_NAME, BRIEF_PATH, buildPreamble, checkBrief, redact } from "./brief.mjs";
+import { RECORD_DIR } from "./dossier.mjs";
 
 // `oats cloning spawn --plan <plan.json>`: run by the cloner. Validates the
 // plan against the request and the source, assembles and redacts the brief,
@@ -173,10 +174,25 @@ export function checkIdentity(cloneMeta, srcMeta, { clone, cloneHome, srcHome, e
 const mode = (path) => { try { const st = lstatSync(path); return st.isFile() ? st.mode & 0o777 : null; } catch { return null; } };
 
 export function spawnClone(argv, deps = {}) {
+  let home = null, preview = false;
+  try {
+    const out = spawnOnce(argv, deps, (h) => { home = h; });
+    preview = out.preview !== undefined;
+    return out;
+  } finally {
+    // The temporary transcript record outlives only a preview (the cloner may
+    // still revise the brief): verified, refused or failed, it goes, so it
+    // never reaches retirement's recovery storage.
+    if (home && !preview) rmSync(join(home, "clone", RECORD_DIR), { recursive: true, force: true });
+  }
+}
+
+function spawnOnce(argv, deps, onHome) {
   const env = deps.env ?? process.env, cwd = deps.cwd ?? process.cwd(), now = deps.now ?? (() => new Date());
   const { flags, positionals } = parseArgs(argv, { values: ["plan"], switches: ["preview", "json"], positionals: 0 });
   if (positionals.length || flags.plan === undefined) fail("E_CLONE_USAGE", "usage: oats cloning spawn --plan <plan.json> [--preview] --json");
   const inv = requireInstance(env, cwd);
+  onHome(inv.home);
   const settings = readSettings(env);
   const plan0 = readJsonFile(flags.plan, "E_CLONE_PLAN", "the plan");
   checkPlanShape(plan0);
@@ -213,7 +229,9 @@ export function spawnClone(argv, deps = {}) {
   const preamble = buildPreamble({
     goal: request.goal,
     source: { instance: srcLive.name, soul: src.soul.name, home: srcLive.home, work: { mode: dossier.work?.mode ?? src.work, branch: dossier.work?.branch ?? null, head: dossier.work?.head ?? null }, running: dossier.source?.running === true },
-    transcript: t ? { included: true, complete: t.complete === true, threads: (t.sessions || []).map((s) => ({ thread: s.thread, until: s.lastTurnId })) } : { included: false },
+    transcript: t
+      ? { included: true, complete: t.complete === true, threads: (t.sessions || []).map((s) => ({ thread: s.thread, until: s.lastTurnId })) }
+      : { included: false },
     relation: { relation: plan.relation, relativeTo: plan.relativeTo },
     cloner: inv.instance, requestedBy: request.requestedBy, createdAt: now().toISOString(),
   });
@@ -227,17 +245,16 @@ export function spawnClone(argv, deps = {}) {
   const uploadDir = ensurePrivateDir(join(cloneDir, "upload"));
   const uploadFile = writePrivate(join(uploadDir, BRIEF_NAME), attachment);
   const taskFile = writePrivate(join(cloneDir, "clone-task.md"), pre.text);
-  // Retirement snapshots a changed home into recovery storage (kernel 0.34), so
-  // once the apply ran, the copies of the source's files and the dossier go too:
-  // nothing private of the source outlives the cloner. The receipt, request and
-  // plan stay as the cloner's evidence.
+  // Before a clone exists, a refusal is retryable: the cloner's brief and plan
+  // stay. Once the apply ran, the outcome is final and retirement would
+  // snapshot a changed home into recovery storage (kernel 0.34), so everything
+  // in clone/ but the receipt goes: the source copies, the dossier, the brief,
+  // the plan and the transcript record. The receipt holds no source text.
   const cleanup = ({ keepBrief }) => {
     rmSync(uploadDir, { recursive: true, force: true });
     rmSync(taskFile, { force: true });
     if (keepBrief) return;
-    rmSync(briefPath, { force: true });
-    rmSync(join(cloneDir, "source"), { recursive: true, force: true });
-    rmSync(join(cloneDir, "dossier.json"), { force: true });
+    for (const entry of readdirSync(cloneDir)) if (entry !== "receipt.json") rmSync(join(cloneDir, entry), { recursive: true, force: true });
   };
 
   // The source's named launch configuration is passed only while it still

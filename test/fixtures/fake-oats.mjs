@@ -4,8 +4,10 @@
 // binary would refuse (integrations lesson):
 //   - `status --json`, `capture --home`, `recall … --json` answer bare JSON;
 //     everything else answers { schemaVersion: 1, ok, result | error };
-//   - `capture --home` exits 1 with a JSON body on failure; `recall` with an
-//     unknown thread or --until id prints to stderr only and exits 1;
+//   - `capture --home` writes into its record root (--root, else
+//     TURN_RECORD_ROOT, else ~/.turn-record) and honours that root's ignore
+//     file; it exits 1 with a JSON body on failure. `recall` reads only its
+//     root, and an unknown thread or --until id prints to stderr and exits 1;
 //   - spawn refuses what bin/oats.mjs refuses: unknown flags, --relation
 //     unrelated with --relative-to, a relation without --relative-to,
 //     --parent with --relation, --name with --purpose, unknown souls and
@@ -16,7 +18,7 @@
 //     taking name-2 when taken; `session input` needs a launched instance.
 // State lives in the JSON file FAKE_OATS_STATE; every call is appended to
 // FAKE_OATS_LOG with its argv, cwd and environment variable names.
-import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, extname, join } from "node:path";
 
@@ -46,16 +48,27 @@ if (cmd === "status") {
   bare({ root: state.agentsRoot, agents: [...agents.values()], workspace: { reachable: true } });
 }
 
+// The record root, as packages/record resolves it: --root, else
+// TURN_RECORD_ROOT, else ~/.turn-record. Capture writes one file per captured
+// session under <root>/streams and skips sessions whose id the root's ignore
+// file names; recall finds only threads captured into the root it is given.
+const recordRoot = () => flag("root") ?? process.env.TURN_RECORD_ROOT ?? join(process.env.HOME, ".turn-record");
+
 if (cmd === "capture") {
-  const home = flag("home");
+  const home = flag("home"), root = recordRoot();
   const c = state.capture?.[home];
   if (!c) bare({ home, owner: "test", appended: null, skipped: false, held: 0, incomplete: 0, failed: 1, ignored: 0, status: "failed", complete: false, sessions: [], sourceRoots: "launch-history", error: "no sessions recorded for this home" }, 1);
-  bare({ home, owner: "test", appended: 0, skipped: false, held: 0, incomplete: c.complete ? 0 : 1, failed: 0, ignored: 0, status: c.complete ? "complete" : "incomplete", complete: c.complete, sessions: c.sessions.map((s) => ({ thread: s.thread, source: "cc", sessionId: s.sessionId, path: "/x", cwd: home, stream: `test~claude.${s.sessionId}`, turns: s.ids.length, firstTurnId: s.ids[0], lastTurnId: s.ids.at(-1), lastTs: "2026-10-01T00:00:00Z" })), sourceRoots: "launch-history" });
+  const ignore = existsSync(join(root, "ignore")) ? readFileSync(join(root, "ignore"), "utf8").split("\n").map((l) => l.trim()).filter(Boolean) : [];
+  const kept = c.sessions.filter((s) => !ignore.includes(s.sessionId));
+  mkdirSync(join(root, "streams"), { recursive: true });
+  for (const s of kept) writeFileSync(join(root, "streams", `test~cc.${s.sessionId}`), JSON.stringify({ thread: s.thread, ids: s.ids }));
+  bare({ home, owner: "test", appended: kept.reduce((n, s) => n + s.ids.length, 0), skipped: false, held: 0, incomplete: c.complete ? 0 : 1, failed: 0, ignored: c.sessions.length - kept.length, status: c.complete ? "complete" : "incomplete", complete: c.complete, sessions: kept.map((s) => ({ thread: s.thread, source: "cc", sessionId: s.sessionId, path: "/x", cwd: home, stream: `test~cc.${s.sessionId}`, turns: s.ids.length, firstTurnId: s.ids[0], lastTurnId: s.ids.at(-1), lastTs: "2026-10-01T00:00:00Z" })), sourceRoots: "launch-history" });
 }
 
 if (cmd === "recall") {
-  const thread = flag("thread");
-  const ids = Object.values(state.capture || {}).flatMap((c) => c.sessions).find((s) => s.thread === thread)?.ids;
+  const thread = flag("thread"), dir = join(recordRoot(), "streams");
+  const stream = existsSync(dir) ? readdirSync(dir).map((f) => JSON.parse(readFileSync(join(dir, f), "utf8"))).find((r) => r.thread === thread) : undefined;
+  const ids = stream?.ids;
   if (!ids) { process.stderr.write(`--until: no turn in thread ${thread}\n`); process.exit(1); }
   const until = flag("until");
   let end = ids.length;
