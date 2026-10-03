@@ -65,10 +65,15 @@ change.
   - JWTs;
   - `Authorization: Bearer` tokens (the token only);
   - credentials in URLs (`scheme://user:pass@host` keeps its scheme and host);
-  - `secret=…` style assignments.
+  - assignments to a key that names a secret (`password`, `secret`, `token`,
+    `api_key`, `private_key` and prefixed forms such as `client_secret` or
+    `AWS_SECRET_ACCESS_KEY`), in any case, with `=` or `:`, bare or as a JSON
+    or YAML key. References (`$PASSWORD`, `<password>`, `${SECRET}`) and words
+    that say there is no value (`none`, `null`, `true`, …) are left alone.
 
   Every match is replaced. Only `{line, pattern}` is reported, never the
-  value.
+  value. Redaction is a seatbelt: it catches these patterns, not every
+  secret, so the cloner's exclusions (`/plan-clone`) stay the policy.
 - **The transcript is read through a temporary record, never the host
   record.** It is included by default: asking for the clone is the consent,
   and `--transcript exclude` opts out. `dossier` runs
@@ -110,7 +115,7 @@ run `oats sync`:
 
 ```yaml
 packages:
-  oats.cloning: git:github.com/awebai/oats-cloning@v1.0.0
+  oats.cloning: git:github.com/awebai/oats-cloning@v1.0.1
 ```
 
 ```yaml
@@ -226,8 +231,17 @@ npm test        # validates the manifests, then runs every test
   a path with an `@` (`https://host:8080/x@y`), or a URL with no opening quote
   or bracket that runs into other text with no whitespace between
   (`https://db.example:443,(ops@example.com)`), can have that path or text
-  redacted as if it were credentials. Redaction errs toward over-redacting,
-  never toward a leak.
+  redacted as if it were credentials.
+- Redaction is pattern-limited. A secret in a form no pattern recognises
+  survives it: a bare (unquoted) assignment value shorter than 4 characters,
+  or a key that names no secret (`db_pass=…`). Where a pattern's boundary is
+  ambiguous it redacts more rather than less.
+- Under `delivery: channel` (oats.aweb), Claude Code loads the aweb channel
+  as a development channel and stops at its "Loading development channels"
+  confirmation before the session starts. A Claude Code cloner or clone then
+  waits there until a human answers it in that instance's terminal; the
+  start carries the `channel-dev-confirmation` warning. Under
+  `delivery: session`, or on another harness, this does not arise.
 - With oats.aweb 1.17.5, `oats session start` does not re-emit
   `AWEB_IDENTITY_HOME`. `spawn` then finds the clone's identity in its own
   `<home>/.aw` and reports a warning.

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.1
+
+- Secret assignments are redacted in any case and as JSON or YAML keys:
+  `password=…`, `secret: …`, `api_key = …`, `client_secret=…`,
+  `"PASSWORD": "…"`, `password: "…"`. A quoted value is redacted to its
+  closing quote, spaces included. References (`$PASSWORD`, `<password>`,
+  `${SECRET}`) and no-value words (`none`, `null`, `true`, …) are left alone.
+  `{line, pattern}` reporting is unchanged.
+- README: redaction is pattern-limited (what survives it), and under
+  `delivery: channel` a Claude Code cloner or clone waits at Claude Code's
+  development-channels confirmation.
+
 ## 1.0.0
 
 First release.

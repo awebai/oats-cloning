@@ -72,6 +72,6 @@ test("the validator passes the package and rejects hooks or a version drift", (t
   const hooked = validateMutated(t, (d) => { const m = JSON.parse(readFileSync(capPath(d))); m.hooks = { spawn: "bin/oats-cloning.mjs request" }; writeFileSync(capPath(d), JSON.stringify(m)); });
   assert.equal(hooked.status, 1);
   assert.match(hooked.stderr, /no lifecycle hooks/);
-  const drift = validateMutated(t, (d) => { const m = JSON.parse(readFileSync(capPath(d))); m.version = "1.0.1"; writeFileSync(capPath(d), JSON.stringify(m)); });
+  const drift = validateMutated(t, (d) => { const m = JSON.parse(readFileSync(capPath(d))); m.version = "0.0.0-drift"; writeFileSync(capPath(d), JSON.stringify(m)); });
   assert.equal(drift.status, 1);
 });

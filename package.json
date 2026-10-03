@@ -1,6 +1,6 @@
 {
   "name": "@awebai/oats-cloning",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Official OATS instance cloning: clone an instance for a new goal through a short-lived cloner soul.",
   "license": "MIT",
   "type": "module",
