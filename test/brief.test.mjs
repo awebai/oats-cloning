@@ -165,6 +165,10 @@ test("assignment forms in any case, with spaced separators, and as JSON or YAML 
     // A quoted value runs to its closing quote (spaces and all), or to the end of the line.
     ['password: "correct horse battery"', 'password: "[redacted:secret-assignment]"'],
     [`password: "${v}`, 'password: "[redacted:secret-assignment]'],
+    // ...to its REAL closing quote: a JSON \" or \\ and a YAML '' are part of the value.
+    [String.raw`{"password":"\"` + v + '"}', '{"password":"[redacted:secret-assignment]"}'],
+    [String.raw`{"password":"ab\\cd\"` + v + '","id":"x"}', '{"password":"[redacted:secret-assignment]","id":"x"}'],
+    [`password: 'a''${v}'`, "password: '[redacted:secret-assignment]'"],
   ];
   for (const [text, expected] of cases) {
     const r = redact(text);
@@ -185,6 +189,21 @@ test("near-misses of the assignment pattern stay untouched: prose, references, e
   const r = redact(text);
   assert.deepEqual(r.redactions, []);
   assert.equal(r.text, text);
+});
+
+test("an empty assignment never takes the next line: the next line's own assignment is found and reported there", () => {
+  const v = "s3cr" + "etVal42";
+  const r = redact(`password:\nAPI_KEY = ${v}\npassword=\nnext ordinary line`, { firstLine: 10 });
+  assert.equal(r.text, "password:\nAPI_KEY = [redacted:secret-assignment]\npassword=\nnext ordinary line");
+  assert.deepEqual(r.redactions, [{ line: 11, pattern: "secret-assignment" }]);
+});
+
+test("no-value words are an assignment's exemption only: an Authorization header's token is redacted whatever it reads", () => {
+  for (const tok of ["unset", "true", "null"]) {
+    const r = redact(`Authorization: Bearer ${tok}`);
+    assert.equal(r.text, "Authorization: Bearer [redacted:bearer-token]");
+    assert.deepEqual(r.redactions, [{ line: 1, pattern: "bearer-token" }]);
+  }
 });
 
 test("npm, Google, Bearer and URL credentials: the forms that matter, each reported once", () => {

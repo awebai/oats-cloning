@@ -217,9 +217,11 @@ export const PATTERNS = [
   // NAME=value / NAME: value for credential-shaped names. Only the value is
   // replaced; a reference ($VAR, <placeholder>) is not a value.
   // A key naming a secret, in any case, bare or quoted (JSON, YAML), with any prefix (client_secret,
-  // AWS_SECRET_ACCESS_KEY, x-api-key), then : or =, then the value: a quoted value runs to its
-  // closing quote or the end of the line, a bare one to whitespace (at least 4 characters).
-  { name: "secret-assignment", re: new RegExp(String.raw`(?<![A-Za-z0-9])((["']?)(?:[A-Za-z][A-Za-z0-9]*[_-])*(?:api[_-]?key|secret[_-]access[_-]key|secret[_-]?key|private[_-]?key|secret|token|password|passwd)\2)(\s*[:=]\s*)(["']?)((?<=")[^"\n]+|(?<=')[^'\n]+|(?<!["'])[^\s"'\x60]{4,})`, "gi"), value: true },
+  // AWS_SECRET_ACCESS_KEY, x-api-key), then : or = on the same line, then the value. A quoted value
+  // runs to its real closing quote (a JSON \" or \\ and a YAML '' are part of it) or to the end of
+  // the line; a bare one runs to whitespace (at least 4 characters). An empty value never takes
+  // the next line. Words that say there is no value (none, null, …) are not values here.
+  { name: "secret-assignment", re: new RegExp(String.raw`(?<![A-Za-z0-9])((["']?)(?:[A-Za-z][A-Za-z0-9]*[_-])*(?:api[_-]?key|secret[_-]access[_-]key|secret[_-]?key|private[_-]?key|secret|token|password|passwd)\2)([ \t]*[:=][ \t]*)(["']?)((?<=")(?:[^"\\\n]|\\.)+|(?<=')(?:[^'\n]|'')+|(?<!["'])[^\s"'\x60]{4,})`, "gi"), value: true, noValueWords: true },
 ];
 
 const lineAt = (text, offset) => {
@@ -234,7 +236,7 @@ const lineAt = (text, offset) => {
 export function redact(text, { firstLine = 1 } = {}) {
   let out = text;
   const redactions = [];
-  for (const { name, re, value, spans } of PATTERNS) {
+  for (const { name, re, value, spans, noValueWords } of PATTERNS) {
     if (spans) {
       // Single-line spans, replaced last to first so offsets stay valid.
       const found = spans(out);
@@ -248,7 +250,7 @@ export function redact(text, { firstLine = 1 } = {}) {
       if (value) {
         // The value is each value pattern's last group and ends its match: only it is replaced.
         const val = m.at(-3);
-        if (isReference(val) || NON_VALUE.test(val)) return match;
+        if (isReference(val) || (noValueWords && NON_VALUE.test(val))) return match;
         redactions.push({ line: lineAt(out, offset) + firstLine - 1, pattern: name });
         return `${match.slice(0, match.length - val.length)}[redacted:${name}]`;
       }
