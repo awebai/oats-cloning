@@ -114,6 +114,8 @@ export function buildPreamble(p) {
 }
 
 const isReference = (v) => /^(?:\$|<|\[redacted|\*{3,}|x{3,}$)/i.test(v);
+// Words that say there is no value (secret: none), never a secret themselves.
+const NON_VALUE = /^(?:none|null|nil|true|false|empty|unset|n\/a)[,;.]*$/i;
 
 const URL_SCHEME = /\b[a-z][a-z0-9+.-]*:\/\//gi;
 // What ends a URL's authority: whitespace, the starts of path, query and
@@ -214,7 +216,10 @@ export const PATTERNS = [
   { name: "url-credentials", spans: urlCredentials },
   // NAME=value / NAME: value for credential-shaped names. Only the value is
   // replaced; a reference ($VAR, <placeholder>) is not a value.
-  { name: "secret-assignment", re: /\b((?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|TOKEN|SECRET|SECRET_ACCESS_KEY|PASSWORD|PASSWD|PRIVATE_KEY))(\s*[:=]\s*)(["']?)([^\s"'`]{4,})/g, value: true },
+  // A key naming a secret, in any case, bare or quoted (JSON, YAML), with any prefix (client_secret,
+  // AWS_SECRET_ACCESS_KEY, x-api-key), then : or =, then the value: a quoted value runs to its
+  // closing quote or the end of the line, a bare one to whitespace (at least 4 characters).
+  { name: "secret-assignment", re: new RegExp(String.raw`(?<![A-Za-z0-9])((["']?)(?:[A-Za-z][A-Za-z0-9]*[_-])*(?:api[_-]?key|secret[_-]access[_-]key|secret[_-]?key|private[_-]?key|secret|token|password|passwd)\2)(\s*[:=]\s*)(["']?)((?<=")[^"\n]+|(?<=')[^'\n]+|(?<!["'])[^\s"'\x60]{4,})`, "gi"), value: true },
 ];
 
 const lineAt = (text, offset) => {
@@ -241,10 +246,11 @@ export function redact(text, { firstLine = 1 } = {}) {
       const offset = m.at(-2);
       const match = m[0];
       if (value) {
-        const [, key, sep, quote, val] = m;
-        if (isReference(val)) return match;
+        // The value is each value pattern's last group and ends its match: only it is replaced.
+        const val = m.at(-3);
+        if (isReference(val) || NON_VALUE.test(val)) return match;
         redactions.push({ line: lineAt(out, offset) + firstLine - 1, pattern: name });
-        return `${key}${sep}${quote}[redacted:${name}]`;
+        return `${match.slice(0, match.length - val.length)}[redacted:${name}]`;
       }
       redactions.push({ line: lineAt(out, offset) + firstLine - 1, pattern: name });
       return `[redacted:${name}]` + "\n".repeat((match.match(/\n/g) || []).length);

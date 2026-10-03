@@ -145,6 +145,48 @@ test("assignment forms: PASSWORD, *_API_KEY, quoted values; references are not v
   assert.match(r.text, /^TOKEN=\$GITHUB_TOKEN$/m);
 });
 
+test("assignment forms in any case, with spaced separators, and as JSON or YAML keys; each reported once", () => {
+  const v = "s3cr" + "etVal42";
+  const cases = [
+    [`password=${v}`, "password=[redacted:secret-assignment]"],
+    [`secret: ${v}`, "secret: [redacted:secret-assignment]"],
+    [`api_key = ${v}`, "api_key = [redacted:secret-assignment]"],
+    [`client_secret=${v}`, "client_secret=[redacted:secret-assignment]"],
+    [`Password :  ${v}`, "Password :  [redacted:secret-assignment]"],
+    [`apiKey: ${v}`, "apiKey: [redacted:secret-assignment]"],
+    [`x-api-key: ${v}`, "x-api-key: [redacted:secret-assignment]"],
+    [`--password=${v}`, "--password=[redacted:secret-assignment]"],
+    [`AWS_SECRET_ACCESS_KEY=${v}`, "AWS_SECRET_ACCESS_KEY=[redacted:secret-assignment]"],
+    [`"PASSWORD": "${v}"`, '"PASSWORD": "[redacted:secret-assignment]"'],
+    [`"api_key":"${v}"`, '"api_key":"[redacted:secret-assignment]"'],
+    [`{"client_secret": "${v}", "id": "x"}`, '{"client_secret": "[redacted:secret-assignment]", "id": "x"}'],
+    [`'token': '${v}'`, "'token': '[redacted:secret-assignment]'"],
+    [`password: "${v}"`, 'password: "[redacted:secret-assignment]"'],
+    // A quoted value runs to its closing quote (spaces and all), or to the end of the line.
+    ['password: "correct horse battery"', 'password: "[redacted:secret-assignment]"'],
+    [`password: "${v}`, 'password: "[redacted:secret-assignment]'],
+  ];
+  for (const [text, expected] of cases) {
+    const r = redact(text);
+    assert.equal(r.text, expected);
+    assert.deepEqual(r.redactions, [{ line: 1, pattern: "secret-assignment" }], text);
+    assert.deepEqual(redact(r.text), { text: r.text, redactions: [] }, `redacting again changes nothing: ${text}`);
+  }
+});
+
+test("near-misses of the assignment pattern stay untouched: prose, references, empty and no-value words", () => {
+  const text = [
+    "the password policy; the secret is out; passwords: many",
+    "secret: none, password: null, token: true, api_key: n/a",
+    "PASSWORD=$PASSWORD, password: <password>, secret=${SECRET}",
+    'password=, password: ""',
+    "tokens=5, password_policy: strict, secretary: Jane Doe, token_count: 12345",
+  ].join("\n");
+  const r = redact(text);
+  assert.deepEqual(r.redactions, []);
+  assert.equal(r.text, text);
+});
+
 test("npm, Google, Bearer and URL credentials: the forms that matter, each reported once", () => {
   const tok = "k7Qz9" + "Lm3Np".repeat(4);
   const npm = "npm" + "_" + "a1B2c3D4e5".repeat(3) + "f6G7h8";
