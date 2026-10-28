@@ -206,7 +206,9 @@ npm test        # validates the manifests, then runs every test
   `test/fixtures/fake-oats.mjs`, a stand-in for `bin/oats.mjs`. It models the
   kernel's answer shapes and refusals. When the kernel's behaviour changes,
   change the fake to match it first: a test that passes against a wrong fake
-  proves nothing.
+  proves nothing. The fake models kernel 0.34.0, below the package floor
+  (0.69.2), and CI has no real-kernel job: the cloner soul's `background:`
+  default is checked by a rehearsal on a released kernel, not by `npm test`.
 - The fake models the record the way `packages/record` does. Capture writes
   to `--root`, else `TURN_RECORD_ROOT`, else `~/.turn-record`, and honours
   that root's ignore file. Recall reads only its own root.

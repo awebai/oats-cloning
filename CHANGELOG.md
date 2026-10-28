@@ -5,12 +5,13 @@
 ### Upgrade
 
 - **Requires OATS >=0.69.2** (was >=0.34.0). The `cloner` soul now says
-  `background: true`, and a kernel before 0.69.2 refuses that key: it drops
-  the soul from discovery, so `oats cloning request` could not spawn a
-  cloner. The floor makes that kernel refuse every spawn that composes
-  oats.cloning (`E_CAPABILITY_INCOMPATIBLE`, naming the re-pin) instead. It
-  does not stop `oats sync` from locking this release. Upgrade OATS to 0.69.2
-  first, then this package.
+  `background: true`, and a kernel before 0.69.2 refuses that key. On such a
+  kernel `oats sync` still locks this release but reports the key as a
+  problem, and the soul is dropped: `oats cloning request` refuses with
+  `E_SOUL_UNKNOWN`. The floor makes new spawns of every soul composing
+  oats.cloning refuse too, with `E_CAPABILITY_INCOMPATIBLE` naming the
+  re-pin, so an early lock fails at the next such spawn. Homes that already
+  exist keep running. Upgrade OATS to 0.69.2 first, then this package.
 
 ### Changed
 
