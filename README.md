@@ -117,7 +117,7 @@ run `oats sync`:
 
 ```yaml
 packages:
-  oats.cloning: git:github.com/awebai/oats-cloning@v1.0.1
+  oats.cloning: git:github.com/awebai/oats-cloning@v1.1.0
 ```
 
 ```yaml
