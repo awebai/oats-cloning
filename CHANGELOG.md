@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Upgrade
+
+- **Requires OATS >=0.69.2** (was >=0.34.0). The `cloner` soul now says
+  `background: true`, and a kernel before 0.69.2 refuses that key. On such a
+  kernel `oats sync` still locks this release but reports the key as a
+  problem, and the soul is dropped: `oats cloning request` refuses with
+  `E_SOUL_UNKNOWN`. The floor makes new spawns of every soul composing
+  oats.cloning refuse too, with `E_CAPABILITY_INCOMPATIBLE` naming the
+  re-pin, so an early lock fails at the next such spawn. Homes that already
+  exist keep running. Upgrade OATS to 0.69.2 first, then this package.
+
+### Changed
+
+- **Cloners are background instances** (awebai/oats#1579). A new cloner is
+  listed under the Desktop's and the TUI's Background section, out of the
+  main list; one that waits on you still lights that section's heading. The
+  clone is unchanged: it is placed as its own soul says. No existing cloner
+  moves. Only presentation changes, not how a clone is made.
+
 ## 1.0.1
 
 - Secret assignments are redacted in any case and as JSON or YAML keys:

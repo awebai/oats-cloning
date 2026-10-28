@@ -14,7 +14,7 @@ test("the capability has no lifecycle hooks and exactly the three commands", () 
   assert.equal(manifest.hooks, undefined);
   assert.deepEqual(Object.keys(manifest.commands).sort(), ["dossier", "request", "spawn"]);
   for (const spec of Object.values(manifest.commands)) assert.match(spec, /^bin\/oats-cloning\.mjs [a-z]+$/);
-  assert.equal(manifest.compatibility.oats, ">=0.34.0");
+  assert.equal(manifest.compatibility.oats, ">=0.69.2");
 });
 
 test("the inject is short and says the three things", () => {
@@ -74,4 +74,10 @@ test("the validator passes the package and rejects hooks or a version drift", (t
   assert.match(hooked.stderr, /no lifecycle hooks/);
   const drift = validateMutated(t, (d) => { const m = JSON.parse(readFileSync(capPath(d))); m.version = "0.0.0-drift"; writeFileSync(capPath(d), JSON.stringify(m)); });
   assert.equal(drift.status, 1);
+});
+
+test("the cloner soul keeps no knowledge and defaults to background (OATS >=0.69.2)", () => {
+  const soul = readFileSync(join(REPO, "oats-package", "souls", "cloner", "soul.yaml"), "utf8");
+  assert.match(soul, /^knowledge: none(?:\s+#.*)?$/m);
+  assert.match(soul, /^background: true(?:\s+#.*)?$/m);
 });

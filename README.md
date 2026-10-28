@@ -11,7 +11,9 @@ The package ships:
 - the capability `oats.cloning` (command `oats cloning`), with four commands,
   four skills and a short instruction inject;
 - the package soul `oats.cloning/cloner`. It is a short-lived soul that handles
-  one clone request and then retires itself.
+  one clone request and then retires itself. It declares `background: true`,
+  so the clients list a new cloner under their Background section, out of the
+  main list (the clone itself is placed as its own soul says).
 
 The member soul `souls/oats-cloning-expert` maintains this repository.
 
@@ -134,7 +136,8 @@ Settings (`settings.oats.cloning`):
 | `cloner` | `oats.cloning/cloner` | the soul `request` spawns as the cloner; the code never names the package |
 | `brief-max-bytes` | `49152` | the brief's size limit (1 KiB to 1 MiB) |
 
-Requirements: OATS `>=0.34.0`, Node 22, `git`, and `aw` when the deployment
+Requirements: OATS `>=0.69.2` (the first kernel that reads the cloner soul's
+`background:` key), Node 22, `git`, and `aw` when the deployment
 uses aweb messaging.
 
 ## Commands
@@ -203,7 +206,9 @@ npm test        # validates the manifests, then runs every test
   `test/fixtures/fake-oats.mjs`, a stand-in for `bin/oats.mjs`. It models the
   kernel's answer shapes and refusals. When the kernel's behaviour changes,
   change the fake to match it first: a test that passes against a wrong fake
-  proves nothing.
+  proves nothing. The fake models kernel 0.34.0, below the package floor
+  (0.69.2), and CI has no real-kernel job: the cloner soul's `background:`
+  default is checked by a rehearsal on a released kernel, not by `npm test`.
 - The fake models the record the way `packages/record` does. Capture writes
   to `--root`, else `TURN_RECORD_ROOT`, else `~/.turn-record`, and honours
   that root's ignore file. Recall reads only its own root.
